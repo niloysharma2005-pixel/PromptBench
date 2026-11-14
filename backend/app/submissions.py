@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from backend.app.db import get_db
 from backend.app.models import Submission, Question, TranscriptTurn, Evaluation
 from backend.app.schemas import SubmissionCreate, SubmissionResponse, MessageCreate, MessageResponse, SubmitFinal, EvaluationResponse
@@ -105,21 +106,37 @@ def add_message(
             detail="Submission is not in progress"
         )
 
+    def _save_turn_with_retry(sub_id: int, role: str, content: str) -> TranscriptTurn:
+        try:
+            idx = db.query(TranscriptTurn).filter(TranscriptTurn.submission_id == sub_id).count()
+            t = TranscriptTurn(
+                submission_id=sub_id,
+                turn_index=idx,
+                role=role,
+                content=content,
+                created_at=datetime.now(timezone.utc)
+            )
+            db.add(t)
+            db.commit()
+            db.refresh(t)
+            return t
+        except IntegrityError:
+            db.rollback()
+            idx = db.query(TranscriptTurn).filter(TranscriptTurn.submission_id == sub_id).count()
+            t = TranscriptTurn(
+                submission_id=sub_id,
+                turn_index=idx,
+                role=role,
+                content=content,
+                created_at=datetime.now(timezone.utc)
+            )
+            db.add(t)
+            db.commit()
+            db.refresh(t)
+            return t
+
     # Save candidate's message
-    user_turn_index = db.query(TranscriptTurn).filter(
-        TranscriptTurn.submission_id == submission.id
-    ).count()
-    
-    user_turn = TranscriptTurn(
-        submission_id=submission.id,
-        turn_index=user_turn_index,
-        role="user",
-        content=payload.message,
-        created_at=datetime.now(timezone.utc)
-    )
-    db.add(user_turn)
-    db.commit()
-    db.refresh(user_turn)
+    user_turn = _save_turn_with_retry(submission.id, "user", payload.message)
 
     # Fetch all turns for this submission to pass history to helper LLM
     turns = db.query(TranscriptTurn).filter(
@@ -144,19 +161,7 @@ def add_message(
         )
 
     # Save helper AI's reply
-    assistant_turn_index = db.query(TranscriptTurn).filter(
-        TranscriptTurn.submission_id == submission.id
-    ).count()
-    
-    assistant_turn = TranscriptTurn(
-        submission_id=submission.id,
-        turn_index=assistant_turn_index,
-        role="assistant",
-        content=reply,
-        created_at=datetime.now(timezone.utc)
-    )
-    db.add(assistant_turn)
-    db.commit()
+    assistant_turn = _save_turn_with_retry(submission.id, "assistant", reply)
     
     return {"reply": reply}
 

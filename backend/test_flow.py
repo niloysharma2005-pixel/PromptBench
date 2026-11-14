@@ -246,6 +246,11 @@ class PromptBenchTestCase(unittest.TestCase):
         submit_fail = self.client.post(f"/api/submissions/{sub_id}/submit", json={"final_answer_text": "Another recommendation."}, headers=headers)
         self.assertEqual(submit_fail.status_code, 400)
 
+    def test_turn_index_unique_constraint_defined(self):
+        table_args = getattr(TranscriptTurn, "__table_args__", ())
+        constraint_names = [c.name for c in table_args if hasattr(c, "name")]
+        self.assertIn("uq_submission_turn_index", constraint_names)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================

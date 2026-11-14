@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, func
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from backend.app.db import Base
@@ -47,6 +47,9 @@ class Submission(Base):
 
 class TranscriptTurn(Base):
     __tablename__ = "transcript_turns"
+    __table_args__ = (
+        UniqueConstraint("submission_id", "turn_index", name="uq_submission_turn_index"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False)
