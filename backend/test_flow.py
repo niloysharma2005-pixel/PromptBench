@@ -307,6 +307,60 @@ class PromptBenchTestCase(unittest.TestCase):
         self.assertEqual(history[0]["content"], "Turn 6")
         self.assertEqual(history[-1]["content"], "Turn 44")
 
+    def test_rate_limit_key_and_shared_bucket(self):
+        from backend.app.auth_utils import create_access_token
+        from backend.app.limiter import get_user_rate_limit_key, limiter
+        from starlette.requests import Request
+
+        token1 = create_access_token({"user_id": 99, "nonce": 1})
+        token2 = create_access_token({"user_id": 99, "nonce": 2})
+        self.assertNotEqual(token1, token2)
+
+        scope1 = {"type": "http", "headers": [(b"authorization", f"Bearer {token1}".encode())], "client": ("127.0.0.1", 1234)}
+        scope2 = {"type": "http", "headers": [(b"authorization", f"Bearer {token2}".encode())], "client": ("127.0.0.1", 5678)}
+        key1 = get_user_rate_limit_key(Request(scope1))
+        key2 = get_user_rate_limit_key(Request(scope2))
+
+        self.assertEqual(key1, "user:99")
+        self.assertEqual(key2, "user:99")
+
+        scope_invalid = {"type": "http", "headers": [(b"authorization", b"Bearer invalidtoken")], "client": ("192.168.1.5", 1234)}
+        key_invalid = get_user_rate_limit_key(Request(scope_invalid))
+        self.assertEqual(key_invalid, "192.168.1.5")
+
+    def test_rate_limiting_exceeded_returns_429(self):
+        from unittest.mock import MagicMock
+        from backend.app.auth_utils import create_access_token
+        from backend.app.db import get_db
+        from backend.app.auth import get_current_user
+        from backend.app.models import User
+        from backend.app.limiter import limiter
+        limiter.reset()
+
+        dummy_user = User(id=777, email="rl_test@example.com")
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_current_user] = lambda: dummy_user
+
+        try:
+            token1 = create_access_token({"user_id": 777, "session": "a"})
+            token2 = create_access_token({"user_id": 777, "session": "b"})
+            headers1 = {"Authorization": f"Bearer {token1}"}
+            headers2 = {"Authorization": f"Bearer {token2}"}
+
+            responses = []
+            for i in range(12):
+                h = headers1 if i % 2 == 0 else headers2
+                res = self.client.post("/api/submissions/999999/submit", json={"final_answer_text": "Answer"}, headers=h)
+                responses.append(res.status_code)
+
+            self.assertIn(429, responses)
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================
