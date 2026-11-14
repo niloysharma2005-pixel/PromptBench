@@ -21,9 +21,21 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["ENV"] = "testing"
 if "RUN_LLM_TESTS" not in os.environ:
     os.environ["RUN_LLM_TESTS"] = "false"
-# If no DATABASE_URL is set, we will use a dummy test URL to pass import checks,
-# but we tell the user they must supply one.
-if not os.getenv("DATABASE_URL"):
+
+# Enforce TEST_DATABASE_URL isolation
+dev_db_url = os.getenv("DATABASE_URL")
+test_db_url = os.getenv("TEST_DATABASE_URL")
+
+if dev_db_url and test_db_url and dev_db_url.strip().rstrip("/") == test_db_url.strip().rstrip("/"):
+    raise RuntimeError(
+        "FATAL: TEST_DATABASE_URL cannot equal DATABASE_URL. "
+        "Tests must run against an isolated test database to protect development data."
+    )
+
+# When running tests, if TEST_DATABASE_URL is provided, route database connection to it
+if test_db_url:
+    os.environ["DATABASE_URL"] = test_db_url
+elif not dev_db_url:
     os.environ["DATABASE_URL"] = "postgresql://dummy:dummy@localhost:5432/dummy"
 if not os.getenv("GEMINI_MODEL"):
     os.environ["GEMINI_MODEL"] = "gemini-2.5-flash"
@@ -799,6 +811,28 @@ class PromptBenchTestCase(unittest.TestCase):
         # 5. Verify question count did not increase (upserted, not duplicated)
         final_q_count = self.db.query(Question).count()
         self.assertEqual(initial_q_count, final_q_count, "Re-seeding created duplicate questions!")
+
+    def test_test_db_isolation_refuses_when_equal(self):
+        from backend.app.config import check_test_db_isolation
+        with self.assertRaises(RuntimeError) as ctx:
+            check_test_db_isolation(
+                "postgresql://postgres@localhost:5432/postgres",
+                "postgresql://postgres@localhost:5432/postgres"
+            )
+        self.assertIn("TEST_DATABASE_URL cannot equal DATABASE_URL", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            check_test_db_isolation(
+                "postgresql://postgres@localhost:5432/postgres/",
+                "postgresql://postgres@localhost:5432/postgres"
+            )
+        self.assertIn("TEST_DATABASE_URL cannot equal DATABASE_URL", str(ctx.exception))
+
+        # Distinct URLs must pass without error
+        check_test_db_isolation(
+            "postgresql://postgres@localhost:5432/postgres",
+            "postgresql://postgres@localhost:5432/promptbench_test"
+        )
 
 if __name__ == "__main__":
     unittest.main()

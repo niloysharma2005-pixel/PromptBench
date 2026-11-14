@@ -7,6 +7,7 @@ load_dotenv(env_path)
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL") or os.getenv("ANTHROPIC_MODEL") or "gemini-2.5-flash"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -17,6 +18,15 @@ RATE_LIMIT_SUBMIT = os.getenv("RATE_LIMIT_SUBMIT", "10/minute")
 # Backward compatibility aliases
 ANTHROPIC_API_KEY = GEMINI_API_KEY
 ANTHROPIC_MODEL = GEMINI_MODEL
+
+def check_test_db_isolation(dev_url: str = None, test_url: str = None):
+    d_url = dev_url if dev_url is not None else DATABASE_URL
+    t_url = test_url if test_url is not None else TEST_DATABASE_URL
+    if d_url and t_url and d_url.strip().rstrip("/") == t_url.strip().rstrip("/"):
+        raise RuntimeError(
+            "FATAL: TEST_DATABASE_URL cannot equal DATABASE_URL. "
+            "Tests must run against an isolated test database to protect development data."
+        )
 
 def validate_config():
     missing = []
