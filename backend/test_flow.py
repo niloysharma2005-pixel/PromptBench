@@ -852,5 +852,71 @@ class PromptBenchTestCase(unittest.TestCase):
             dev_db_name = make_url(DEV_DATABASE_URL).database
             self.assertNotEqual(active_db_name, dev_db_name, "Engine database must NOT match development DATABASE_URL.")
 
+    def test_llm_client_generate_structured_and_lenient_fallback(self):
+        from pydantic import BaseModel
+        from backend.app.llm_client import GeminiClient, parse_lenient_json
+
+        class SampleTestSchema(BaseModel):
+            score: int
+            verdict: str
+
+        # Direct JSON string
+        parsed = parse_lenient_json('{"score": 9, "verdict": "excellent"}', schema=SampleTestSchema)
+        self.assertEqual(parsed["score"], 9)
+        self.assertEqual(parsed["verdict"], "excellent")
+
+        # Lenient extraction from markdown fences
+        markdown_fenced = "Here is the result:\n```json\n{\n  \"score\": 10,\n  \"verdict\": \"perfect\"\n}\n```\nHope that helps!"
+        parsed_md = parse_lenient_json(markdown_fenced, schema=SampleTestSchema)
+        self.assertEqual(parsed_md["score"], 10)
+        self.assertEqual(parsed_md["verdict"], "perfect")
+
+    def test_llm_client_retry_exponential_backoff_on_429(self):
+        from backend.app.llm_client import GeminiClient
+
+        client = GeminiClient(api_key="fake-test-key", model="gemini-2.5-flash", max_retries=2)
+        mock_genai_client = MagicMock()
+
+        # Simulate 2 failures with 429 quota exhausted followed by success
+        err_429 = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded")
+        success_resp = MagicMock()
+        success_resp.text = '{"score": 8, "reasoning": "passed after retry"}'
+        mock_genai_client.models.generate_content.side_effect = [err_429, err_429, success_resp]
+        client.client = mock_genai_client
+
+        with patch("time.sleep") as mock_sleep:
+            res = client.generate_structured(
+                system="system prompt",
+                messages=[{"role": "user", "content": "hi"}],
+                schema=None
+            )
+            self.assertEqual(res["score"], 8)
+            self.assertEqual(mock_sleep.call_count, 2)
+            mock_sleep.assert_any_call(1.0)
+            mock_sleep.assert_any_call(2.0)
+
+    def test_mock_llm_client_returns_valid_structured_output(self):
+        from pydantic import BaseModel
+        from backend.app.llm_client import MockLLMClient
+
+        class TargetSchema(BaseModel):
+            rating: int
+            summary: str
+
+        mock_client = MockLLMClient()
+        res = mock_client.generate_structured(
+            system="system",
+            messages=[{"role": "user", "content": "test"}],
+            schema=TargetSchema
+        )
+        self.assertIsInstance(res, dict)
+        self.assertIn("rating", res)
+        self.assertIn("summary", res)
+
+    def test_judge_runs_env_variable(self):
+        from backend.app import config
+        # Default in testing environment is 1
+        self.assertEqual(config.JUDGE_RUNS, 1)
+
 if __name__ == "__main__":
     unittest.main()

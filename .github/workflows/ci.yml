@@ -20,6 +20,7 @@ jobs:
       JWT_SECRET_KEY: test-jwt-secret-key-must-be-long-and-random-321
       RUN_LLM_TESTS: "false"
       ENV: testing
+      JUDGE_RUNS: "1"
     services:
       postgres:
         image: postgres:16

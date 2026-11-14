@@ -14,6 +14,7 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 RUN_LLM_TESTS = os.getenv("RUN_LLM_TESTS", "false").lower() == "true"
 RATE_LIMIT_MESSAGE = os.getenv("RATE_LIMIT_MESSAGE", "30/minute")
 RATE_LIMIT_SUBMIT = os.getenv("RATE_LIMIT_SUBMIT", "10/minute")
+JUDGE_RUNS = int(os.getenv("JUDGE_RUNS", "1" if os.getenv("ENV") == "testing" else "3"))
 
 # Backward compatibility aliases
 ANTHROPIC_API_KEY = GEMINI_API_KEY
