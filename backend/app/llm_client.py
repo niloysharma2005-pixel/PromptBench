@@ -194,7 +194,10 @@ class GeminiClient(LLMClient):
                     config=config,
                 )
                 raw_text = response.text or "{}"
-                return parse_lenient_json(raw_text, schema=schema)
+                parsed = parse_lenient_json(raw_text, schema=schema)
+                if isinstance(parsed, dict):
+                    parsed["_raw_model_text"] = raw_text
+                return parsed
             except Exception as e:
                 last_err = e
                 if is_retryable_error(e) and attempt < self.max_retries:

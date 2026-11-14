@@ -157,33 +157,48 @@ def main():
         judge_runs=3
     )
 
+    def format_submission_output(res):
+        runs = res.get("raw_runs", [])
+        sample_raw = runs[0].get("_raw_model_text") if runs and isinstance(runs[0], dict) else None
+        per_run = []
+        for idx, r in enumerate(runs):
+            if isinstance(r, dict):
+                ds = r.get("dimension_scores", [])
+                if isinstance(ds, list):
+                    scores_map = {item["dimension_name"]: item["score"] for item in ds if isinstance(item, dict) and "dimension_name" in item}
+                elif isinstance(ds, dict):
+                    scores_map = ds
+                else:
+                    scores_map = {}
+                per_run.append({
+                    "run_index": idx + 1,
+                    "dimension_scores": scores_map,
+                    "summary_reasoning": r.get("summary_reasoning"),
+                    "flaw_evaluations": r.get("flaw_evaluations", [])
+                })
+        return {
+            "overall_score": res["overall_score"],
+            "median_scores": res["dimension_scores"],
+            "dimension_scores": res["dimension_scores"],
+            "per_run_scores": per_run,
+            "std_dev": res.get("score_std_dev"),
+            "score_variance": res.get("score_variance"),
+            "score_spread": f"+/- {res.get('score_std_dev', 0.0)} points",
+            "flaw_results": res["flaw_results"],
+            "adjustments": res.get("adjustments", []),
+            "dimension_reasoning": res["dimension_reasoning"],
+            "summary_reasoning": res.get("reasoning"),
+            "sample_raw_model_text": sample_raw,
+            "raw_runs": runs
+        }
+
     # Save output to gitignored directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     smoke_output = {
         "model": GEMINI_MODEL,
         "case": "sudden-churn-spike",
-        "weak_submission": {
-            "overall_score": weak_result["overall_score"],
-            "dimension_scores": weak_result["dimension_scores"],
-            "dimension_reasoning": weak_result["dimension_reasoning"],
-            "flaw_results": weak_result["flaw_results"],
-            "adjustments": weak_result.get("adjustments", []),
-            "score_variance": weak_result.get("score_variance"),
-            "score_std_dev": weak_result.get("score_std_dev"),
-            "score_spread": f"+/- {weak_result.get('score_std_dev', 0.0)} points",
-            "raw_runs": weak_result.get("raw_runs")
-        },
-        "strong_submission": {
-            "overall_score": strong_result["overall_score"],
-            "dimension_scores": strong_result["dimension_scores"],
-            "dimension_reasoning": strong_result["dimension_reasoning"],
-            "flaw_results": strong_result["flaw_results"],
-            "adjustments": strong_result.get("adjustments", []),
-            "score_variance": strong_result.get("score_variance"),
-            "score_std_dev": strong_result.get("score_std_dev"),
-            "score_spread": f"+/- {strong_result.get('score_std_dev', 0.0)} points",
-            "raw_runs": strong_result.get("raw_runs")
-        },
+        "weak_submission": format_submission_output(weak_result),
+        "strong_submission": format_submission_output(strong_result),
         "comparison": {
             "overall_delta": strong_result["overall_score"] - weak_result["overall_score"],
             "weak_overall": weak_result["overall_score"],
