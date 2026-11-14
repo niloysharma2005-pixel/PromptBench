@@ -33,57 +33,23 @@ def load_case_data():
     db = SessionLocal()
     try:
         q = db.query(Question).filter(Question.slug == "sudden-churn-spike").first()
-        if q:
-            return {
-                "prompt_text": q.prompt_text,
-                "context_data": q.context_data,
-                "ground_truth_notes": q.ground_truth_notes,
-                "rubric_json": q.rubric_json,
-                "key_findings": q.key_findings or [],
-                "red_herrings": q.red_herrings or [],
-                "must_include": q.must_include or []
-            }
+        if not q:
+            logger.error("FATAL: Question with slug 'sudden-churn-spike' not found in database. Run backend/seed.py first.")
+            sys.exit(1)
+        return {
+            "prompt_text": q.prompt_text,
+            "context_data": q.context_data,
+            "ground_truth_notes": q.ground_truth_notes,
+            "rubric_json": q.rubric_json,
+            "key_findings": q.key_findings or [],
+            "red_herrings": q.red_herrings or [],
+            "must_include": q.must_include or []
+        }
     except Exception as e:
-        logger.warning(f"Could not load question from DB: {e}. Falling back to default case data.")
+        logger.error(f"FATAL: Database error while loading 'sudden-churn-spike': {e}")
+        sys.exit(1)
     finally:
         db.close()
-
-    # Fallback to seeded definition of sudden-churn-spike if DB unavailable
-    return {
-        "prompt_text": "Investigate why user churn spiked by 20% in the last quarter and recommend corrective actions.",
-        "context_data": (
-            "Quarterly Metrics:\n"
-            "- Overall churn increased from 3.2% to 5.2% (+20% relative spike).\n"
-            "- Customer exit surveys show zero increase in pricing complaints; satisfaction with pricing remains 88%.\n"
-            "- 78% of churned revenue came from Power Users following Release 2.4.\n"
-            "- Release 2.4 removed the legacy 'custom reporting' feature without replacement.\n"
-            "- Competitor pricing has remained unchanged over the past 12 months."
-        ),
-        "ground_truth_notes": (
-            "True root cause is the removal of the custom reporting feature in Release 2.4 impacting Power Users. "
-            "Pricing is an intentional red herring. Lowering prices will not fix customer workflows."
-        ),
-        "rubric_json": {
-            "dimensions": [
-                {"name": "clarifying_questions", "weight": 0.25, "description": "Probing segmentation and timelines"},
-                {"name": "iteration_quality", "weight": 0.25, "description": "Iterating and steering assistant based on data"},
-                {"name": "hallucination_catching", "weight": 0.25, "description": "Detecting and refuting false claims"},
-                {"name": "final_answer_quality", "weight": 0.25, "description": "Accuracy and actionability of recommendations"}
-            ]
-        },
-        "key_findings": [
-            "Power Users drove 78% of churned revenue",
-            "Custom reporting removal in Release 2.4 is root cause"
-        ],
-        "red_herrings": [
-            "Pricing complaints",
-            "Competitor pricing pressure"
-        ],
-        "must_include": [
-            "Reinstate custom reporting or provide workaround",
-            "Reach out to affected Power Users"
-        ]
-    }
 
 def main():
     logger.info("Starting Judge AI Calibration Smoke Test...")
@@ -258,3 +224,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
