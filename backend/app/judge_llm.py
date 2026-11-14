@@ -340,7 +340,8 @@ def call_judge_ai(
     key_findings: Optional[List[str]] = None,
     red_herrings: Optional[List[str]] = None,
     must_include: Optional[List[str]] = None,
-    judge_runs: Optional[int] = None
+    judge_runs: Optional[int] = None,
+    sleep_between_runs: float = 0.0
 ) -> dict:
     """
     Executes judge evaluation:
@@ -420,6 +421,9 @@ def call_judge_ai(
 
     # Sequential judge calls with retry-backoff on validation or network failures
     for i in range(num_runs):
+        if i > 0 and sleep_between_runs > 0:
+            import time
+            time.sleep(sleep_between_runs)
         valid_run = None
         for attempt in range(max_run_attempts):
             try:

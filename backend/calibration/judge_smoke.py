@@ -13,6 +13,8 @@ Evaluates against:
 import os
 import sys
 import json
+import time
+import argparse
 import logging
 
 # Ensure backend root is in sys.path
@@ -52,7 +54,13 @@ def load_case_data():
         db.close()
 
 def main():
+    parser = argparse.ArgumentParser(description="Judge AI calibration smoke test")
+    parser.add_argument("--runs", type=int, default=3, help="Number of sequential judge runs per submission (default: 3)")
+    parser.add_argument("--sleep", type=float, default=2.0, help="Sleep in seconds between runs to respect API quota (default: 2.0)")
+    args = parser.parse_args()
+
     logger.info("Starting Judge AI Calibration Smoke Test...")
+    logger.info(f"Configuration: runs={args.runs}, sleep={args.sleep}s")
 
     # Check key and environment
     is_dummy_key = not GEMINI_API_KEY or GEMINI_API_KEY == "dummy_api_key" or "dummy" in GEMINI_API_KEY.lower()
@@ -127,7 +135,7 @@ def main():
         "3. Process Safeguard: Implement a 60-day feature deprecation policy with telemetry checks before retiring capabilities."
     )
 
-    logger.info("Running Judge AI (JUDGE_RUNS=3) on WEAK submission...")
+    logger.info(f"Running Judge AI (JUDGE_RUNS={args.runs}) on WEAK submission...")
     weak_result = call_judge_ai(
         prompt_text=case["prompt_text"],
         context_data=case["context_data"],
@@ -139,10 +147,14 @@ def main():
         key_findings=case["key_findings"],
         red_herrings=case["red_herrings"],
         must_include=case["must_include"],
-        judge_runs=3
+        judge_runs=args.runs,
+        sleep_between_runs=args.sleep
     )
 
-    logger.info("Running Judge AI (JUDGE_RUNS=3) on STRONG submission...")
+    if args.sleep > 0:
+        time.sleep(args.sleep)
+
+    logger.info(f"Running Judge AI (JUDGE_RUNS={args.runs}) on STRONG submission...")
     strong_result = call_judge_ai(
         prompt_text=case["prompt_text"],
         context_data=case["context_data"],
@@ -154,7 +166,8 @@ def main():
         key_findings=case["key_findings"],
         red_herrings=case["red_herrings"],
         must_include=case["must_include"],
-        judge_runs=3
+        judge_runs=args.runs,
+        sleep_between_runs=args.sleep
     )
 
     def format_submission_output(res):
