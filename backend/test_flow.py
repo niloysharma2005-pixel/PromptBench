@@ -294,6 +294,19 @@ class PromptBenchTestCase(unittest.TestCase):
         )
         self.assertEqual(detail.overall_score, 85)
 
+    def test_history_windowing_drops_leading_assistant_turn(self):
+        from backend.app.submissions import format_helper_history
+        turns = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"Turn {i}"}
+            for i in range(45)
+        ]
+        history = format_helper_history(turns, max_turns=40)
+        self.assertLessEqual(len(history), 40)
+        self.assertEqual(history[0]["role"], "user")
+        self.assertEqual(len(history), 39)
+        self.assertEqual(history[0]["content"], "Turn 6")
+        self.assertEqual(history[-1]["content"], "Turn 44")
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================

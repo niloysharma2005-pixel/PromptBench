@@ -16,6 +16,18 @@ from backend.app.anti_gaming import run_anti_gaming_checks
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 logger = logging.getLogger("submissions")
 
+def format_helper_history(turns: list, max_turns: int = 40) -> list:
+    recent = turns[-max_turns:]
+    while recent and (getattr(recent[0], "role", None) or (recent[0].get("role") if isinstance(recent[0], dict) else "")) != "user":
+        recent = recent[1:]
+    return [
+        {
+            "role": t.role if hasattr(t, "role") else t["role"],
+            "content": t.content if hasattr(t, "content") else t["content"]
+        }
+        for t in recent
+    ]
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_submission(
     payload: SubmissionCreate,
@@ -142,12 +154,12 @@ def add_message(
     # Save candidate's message
     user_turn = _save_turn_with_retry(submission.id, "user", payload.message)
 
-    # Fetch all turns for this submission to pass history to helper LLM (capped to last 40 turns)
+    # Fetch all turns for this submission to pass history to helper LLM (capped to last 40 turns, starting with user)
     turns = db.query(TranscriptTurn).filter(
         TranscriptTurn.submission_id == submission.id
     ).order_by(TranscriptTurn.turn_index.asc()).all()
     
-    history = [{"role": turn.role, "content": turn.content} for turn in turns[-40:]]
+    history = format_helper_history(turns, max_turns=40)
     
     try:
         reply = call_helper_ai(
