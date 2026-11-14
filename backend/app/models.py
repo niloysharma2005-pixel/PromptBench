@@ -18,6 +18,7 @@ class Question(Base):
     __tablename__ = "questions"
 
     id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String, unique=True, index=True, nullable=True)
     title = Column(String, nullable=False)
     category = Column(String, nullable=False)  # 'data_diagnosis' | 'strategy_generation' | 'customer_reasoning'
     prompt_text = Column(Text, nullable=False)

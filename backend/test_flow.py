@@ -62,6 +62,7 @@ class PromptBenchTestCase(unittest.TestCase):
             
             # Setup seed question for testing
             cls.test_question = Question(
+                slug="test-case-study",
                 title="Test Case Study",
                 category="data_diagnosis",
                 difficulty="medium",
@@ -738,6 +739,66 @@ class PromptBenchTestCase(unittest.TestCase):
             self.assertEqual(call_kwargs["response_mime_type"], "application/json")
         finally:
             set_llm_client(None)
+
+    def test_seed_preserves_submissions(self):
+        if not self.has_real_db:
+            self.skipTest("Skipping DB integration test.")
+        from backend.seed import seed_database
+
+        # 1. Run seed to ensure questions exist
+        seed_database(self.db)
+        initial_q_count = self.db.query(Question).count()
+        self.assertGreaterEqual(initial_q_count, 5)
+
+        # 2. Pick a seeded question and create a test user & submission
+        sample_q = self.db.query(Question).filter(Question.slug == "sudden-churn-spike").first()
+        self.assertIsNotNone(sample_q)
+
+        test_user = User(
+            email="seed_preserve_user@example.com",
+            password_hash="fakehash123",
+            name="Seed Preserve Tester"
+        )
+        self.db.add(test_user)
+        self.db.commit()
+        self.db.refresh(test_user)
+
+        test_sub = Submission(
+            user_id=test_user.id,
+            question_id=sample_q.id,
+            status="in_progress"
+        )
+        self.db.add(test_sub)
+        self.db.commit()
+        self.db.refresh(test_sub)
+        sub_id = test_sub.id
+
+        turn = TranscriptTurn(
+            submission_id=sub_id,
+            turn_index=0,
+            role="user",
+            content="Testing seed non-destructive preservation."
+        )
+        self.db.add(turn)
+        self.db.commit()
+
+        # 3. Re-run seed (must not drop questions, submissions, or users)
+        seed_database(self.db)
+
+        # 4. Verify submission, turn, and user are still present
+        preserved_sub = self.db.query(Submission).filter(Submission.id == sub_id).first()
+        self.assertIsNotNone(preserved_sub, "Submission was wiped out by re-seeding!")
+        self.assertEqual(preserved_sub.question_id, sample_q.id)
+
+        preserved_turn = self.db.query(TranscriptTurn).filter(TranscriptTurn.submission_id == sub_id).first()
+        self.assertIsNotNone(preserved_turn, "Transcript turn was wiped out by re-seeding!")
+
+        preserved_user = self.db.query(User).filter(User.id == test_user.id).first()
+        self.assertIsNotNone(preserved_user, "User was wiped out by re-seeding!")
+
+        # 5. Verify question count did not increase (upserted, not duplicated)
+        final_q_count = self.db.query(Question).count()
+        self.assertEqual(initial_q_count, final_q_count, "Re-seeding created duplicate questions!")
 
 if __name__ == "__main__":
     unittest.main()
