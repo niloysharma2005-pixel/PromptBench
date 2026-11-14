@@ -1232,6 +1232,18 @@ class PromptBenchTestCase(unittest.TestCase):
         self.assertEqual(adj_scores5["hallucination_catching"], 2)
         self.assertEqual(len(adjustments5), 0)
 
+    def test_judge_prompt_scoring_anchors_and_version(self):
+        from backend.app.judge_llm import PROMPT_VERSION, JUDGE_SYSTEM_PROMPT
+        self.assertEqual(PROMPT_VERSION, "v4.1")
+        self.assertIn("SCORING ANCHORS", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("Score low when evidence is absent", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("Do NOT reward length or confident tone", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("NOT genuine flaw detection", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("0-2:", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("3-5:", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("6-8:", JUDGE_SYSTEM_PROMPT)
+        self.assertIn("9-10:", JUDGE_SYSTEM_PROMPT)
+
     def test_injection_hardening_sanitizes_xml_tags(self):
         from backend.app.judge_llm import sanitize_tagged_content
         malicious_input = (
