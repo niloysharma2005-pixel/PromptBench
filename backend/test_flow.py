@@ -897,8 +897,164 @@ class PromptBenchTestCase(unittest.TestCase):
             ]
         }
         with self.assertRaises(ValueError) as ctx:
-            calculate_overall_score({"clarifying_questions": 8}, invalid_rubric)
+            calculate_overall_score({"clarifying_questions": 8, "iteration_quality": 8}, invalid_rubric)
         self.assertIn("Rubric dimension weights must sum to 1.0", str(ctx.exception))
+
+    def test_calculate_overall_score_missing_dimension_raises(self):
+        from backend.app.judge_llm import calculate_overall_score
+        rubric = {
+            "dimensions": [
+                {"name": "clarifying_questions", "weight": 0.5},
+                {"name": "iteration_quality", "weight": 0.5}
+            ]
+        }
+        # Missing iteration_quality
+        with self.assertRaises(ValueError) as ctx:
+            calculate_overall_score({"clarifying_questions": 8}, rubric)
+        self.assertIn("Missing required dimension score for 'iteration_quality'", str(ctx.exception))
+
+    def test_validate_judge_run_dimensions_strictness(self):
+        from backend.app.judge_llm import validate_judge_run_dimensions, JudgeRunOutput
+        expected = ["clarifying_questions", "iteration_quality"]
+
+        # Valid run
+        valid_run = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "Asked good questions"},
+                {"dimension_name": "iteration_quality", "score": 9, "reasoning": "Deep iteration"}
+            ]
+        }
+        res = validate_judge_run_dimensions(valid_run, expected)
+        self.assertEqual(len(res), 2)
+
+        # Missing dimension
+        missing_run = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "Asked good questions"}
+            ]
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_judge_run_dimensions(missing_run, expected)
+        self.assertIn("Missing required rubric dimensions", str(ctx.exception))
+
+        # Extra unknown dimension
+        extra_run = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "Asked good questions"},
+                {"dimension_name": "iteration_quality", "score": 9, "reasoning": "Deep iteration"},
+                {"dimension_name": "unknown_dim", "score": 5, "reasoning": "Extra dimension"}
+            ]
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_judge_run_dimensions(extra_run, expected)
+        self.assertIn("Unknown or extra dimension 'unknown_dim'", str(ctx.exception))
+
+        # Duplicate dimension
+        dup_run = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "Asked good questions"},
+                {"dimension_name": "clarifying_questions", "score": 7, "reasoning": "Duplicate question"}
+            ]
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_judge_run_dimensions(dup_run, expected)
+        self.assertIn("Duplicate dimension 'clarifying_questions'", str(ctx.exception))
+
+        # Missing / empty reasoning in dimension item
+        empty_reasoning_run = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "   "},
+                {"dimension_name": "iteration_quality", "score": 9, "reasoning": "Deep iteration"}
+            ]
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_judge_run_dimensions(empty_reasoning_run, expected)
+        self.assertIn("Missing or empty reasoning for dimension 'clarifying_questions'", str(ctx.exception))
+
+        # Dict coercion validator stops inventing reasoning
+        with self.assertRaises(ValueError):
+            JudgeRunOutput.model_validate({
+                "dimension_scores": {
+                    "clarifying_questions": {"score": 8, "reasoning": ""},
+                    "iteration_quality": {"score": 9, "reasoning": "Valid"}
+                },
+                "summary_reasoning": "Overall summary"
+            })
+
+    @patch("backend.app.judge_llm.RUN_LLM_TESTS", True)
+    @patch("backend.app.judge_llm.GEMINI_API_KEY", "dummy-key")
+    def test_call_judge_ai_retries_on_invalid_dimensions(self):
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+        # Attempt 1: missing required dimension
+        invalid_res = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "ok"}
+            ],
+            "summary_reasoning": "ok"
+        }
+        # Attempt 2: valid complete dimensions
+        valid_res = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "ok"},
+                {"dimension_name": "iteration_quality", "score": 9, "reasoning": "ok"}
+            ],
+            "flaw_evaluations": [],
+            "summary_reasoning": "ok"
+        }
+        mock_client.generate_structured.side_effect = [invalid_res, valid_res]
+        set_llm_client(mock_client)
+        try:
+            with patch("time.sleep"):
+                res = call_judge_ai(
+                    prompt_text="task",
+                    context_data="ctx",
+                    transcript=[],
+                    final_answer="ans",
+                    ground_truth_notes="gt",
+                    rubric_json={
+                        "dimensions": [
+                            {"name": "clarifying_questions", "weight": 0.5},
+                            {"name": "iteration_quality", "weight": 0.5}
+                        ]
+                    },
+                    judge_runs=1
+                )
+            self.assertEqual(res["overall_score"], 85)
+            self.assertEqual(mock_client.generate_structured.call_count, 2)
+        finally:
+            set_llm_client(None)
+
+    @patch("backend.app.judge_llm.RUN_LLM_TESTS", True)
+    @patch("backend.app.judge_llm.GEMINI_API_KEY", "dummy-key")
+    def test_call_judge_ai_raises_when_all_attempts_fail(self):
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+        # All attempts return invalid dimensions
+        mock_client.generate_structured.return_value = {
+            "dimension_scores": [],
+            "summary_reasoning": "ok"
+        }
+        set_llm_client(mock_client)
+        try:
+            with patch("time.sleep"):
+                with self.assertRaises(RuntimeError) as ctx:
+                    call_judge_ai(
+                        prompt_text="task",
+                        context_data="ctx",
+                        transcript=[],
+                        final_answer="ans",
+                        ground_truth_notes="gt",
+                        rubric_json={
+                            "dimensions": [
+                                {"name": "clarifying_questions", "weight": 1.0}
+                            ]
+                        },
+                        judge_runs=1
+                    )
+            self.assertIn("no valid runs produced", str(ctx.exception))
+        finally:
+            set_llm_client(None)
 
     def test_injection_hardening_sanitizes_xml_tags(self):
         from backend.app.judge_llm import sanitize_tagged_content

@@ -47,19 +47,17 @@ class JudgeRunOutput(BaseModel):
             coerced = []
             for dim_name, item in v.items():
                 if isinstance(item, dict):
+                    reasoning_text = item.get("reasoning")
+                    if not reasoning_text or not str(reasoning_text).strip():
+                        raise ValueError(f"Missing required reasoning for dimension '{dim_name}'")
                     coerced.append({
                         "dimension_name": dim_name,
-                        "score": item.get("score", 0),
-                        "reasoning": item.get("reasoning", "Evaluated against rubric."),
+                        "score": item.get("score"),
+                        "reasoning": str(reasoning_text).strip(),
                         "evidence": item.get("evidence", "")
                     })
-                elif isinstance(item, (int, float)):
-                    coerced.append({
-                        "dimension_name": dim_name,
-                        "score": int(item),
-                        "reasoning": "Evaluated against rubric.",
-                        "evidence": ""
-                    })
+                else:
+                    raise ValueError(f"Dimension '{dim_name}' must be an object with score and reasoning")
             return coerced
         return v
 
@@ -136,11 +134,16 @@ def calculate_overall_score(
     if not applicable_dims:
         raise ValueError("No applicable dimensions remaining to compute overall score")
 
+    # Validate that every applicable dimension is present without silent defaults
+    for dim in applicable_dims:
+        if dim not in dimension_scores:
+            raise ValueError(f"Missing required dimension score for '{dim}'")
+
     total_applicable_weight = sum(applicable_dims.values())
     renormalised_weights = {dim: w / total_applicable_weight for dim, w in applicable_dims.items()}
 
     weighted_sum = sum(
-        renormalised_weights[dim] * dimension_scores.get(dim, 0)
+        renormalised_weights[dim] * dimension_scores[dim]
         for dim in applicable_dims
     )
     overall = int(round(10.0 * weighted_sum))
@@ -214,6 +217,47 @@ def _build_judge_prompt(
 
     return system_prompt, user_content
 
+def validate_judge_run_dimensions(run_dict: dict, expected_dimensions: Any) -> Dict[str, dict]:
+    """
+    Validates that a judge run output contains every expected rubric dimension exactly once,
+    with no extra or unknown dimension names, and non-empty reasoning.
+    Returns a dict mapping dimension_name to its score item.
+    Raises ValueError if validation fails.
+    """
+    expected_set = set(expected_dimensions)
+    raw = run_dict.get("dimension_scores")
+    if raw is None:
+        raise ValueError("Judge run output missing 'dimension_scores'")
+
+    items_list = []
+    if isinstance(raw, list):
+        items_list = raw
+    elif isinstance(raw, dict):
+        items_list = [{"dimension_name": k, **(v if isinstance(v, dict) else {"score": v})} for k, v in raw.items()]
+    else:
+        raise ValueError(f"Invalid dimension_scores type: {type(raw)}")
+
+    seen_dims: Dict[str, dict] = {}
+    for item in items_list:
+        if not isinstance(item, dict) or "dimension_name" not in item:
+            raise ValueError(f"Invalid dimension score item: {item}")
+        d_name = item["dimension_name"]
+        if d_name in seen_dims:
+            raise ValueError(f"Duplicate dimension '{d_name}' found in judge run output")
+        if d_name not in expected_set:
+            raise ValueError(f"Unknown or extra dimension '{d_name}' not defined in rubric")
+        if "score" not in item or not isinstance(item["score"], (int, float)) or item["score"] < 0 or item["score"] > 10:
+            raise ValueError(f"Invalid score for dimension '{d_name}': {item.get('score')}")
+        if not item.get("reasoning") or not str(item.get("reasoning")).strip():
+            raise ValueError(f"Missing or empty reasoning for dimension '{d_name}'")
+        seen_dims[d_name] = item
+
+    missing = expected_set - set(seen_dims.keys())
+    if missing:
+        raise ValueError(f"Missing required rubric dimensions: {sorted(missing)}")
+
+    return seen_dims
+
 def _get_dimension_scores_map(run_dict: dict) -> Dict[str, dict]:
     """
     Normalizes dimension_scores from either list-of-items or dict-of-items into a dict keyed by dimension name.
@@ -225,7 +269,7 @@ def _get_dimension_scores_map(run_dict: dict) -> Dict[str, dict]:
             if isinstance(v, dict):
                 result[k] = v
             else:
-                result[k] = {"score": int(v), "reasoning": "Evaluated against rubric.", "evidence": ""}
+                result[k] = {"dimension_name": k, "score": int(v), "reasoning": "Evaluated against rubric.", "evidence": ""}
         return result
     if isinstance(raw, list):
         result = {}
@@ -280,13 +324,16 @@ def call_judge_ai(
             "overall_score": overall,
             "dimension_scores": mock_scores,
             "dimension_reasoning": {
-                dim: {"score": s, "reasoning": "Mocked dimension evaluation.", "evidence": "Transcript quote."}
+                dim: {"dimension_name": dim, "score": s, "reasoning": "Mocked dimension evaluation.", "evidence": "Transcript quote."}
                 for dim, s in mock_scores.items()
             },
             "flaw_results": flaw_evals,
             "reasoning": "Mocked Judge evaluation: Candidate successfully solved the case and validated findings.",
             "raw_runs": [{
-                "dimension_scores": {dim: {"score": s, "reasoning": "Mock run", "evidence": "Mock evidence"} for dim, s in mock_scores.items()},
+                "dimension_scores": [
+                    {"dimension_name": dim, "score": s, "reasoning": "Mock run evaluation.", "evidence": "Mock evidence"}
+                    for dim, s in mock_scores.items()
+                ],
                 "flaw_evaluations": flaw_evals,
                 "summary_reasoning": "Mock run evaluation."
             }],
@@ -308,53 +355,59 @@ def call_judge_ai(
         red_herrings=red_herrings
     )
 
+    weights = extract_rubric_weights(rubric_json)
+    expected_dims = set(weights.keys())
+
     client = get_llm_client()
     runs_output: List[dict] = []
+    max_run_attempts = 3
+    base_backoff = 1.0
 
-    # Sequential judge calls to avoid quota spikes on free tier
+    # Sequential judge calls with retry-backoff on validation or network failures
     for i in range(num_runs):
-        try:
-            raw_res = client.generate_structured(
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_content}],
-                schema=JudgeRunOutput,
-                temperature=0.0
-            )
-            runs_output.append(raw_res)
-        except Exception as e:
-            logger.error(f"Judge run {i + 1}/{num_runs} failed: {e}")
-            if not runs_output:
-                raise RuntimeError(f"Judge AI call failed on initial run: {e}")
-            # If at least 1 run succeeded, break and use available runs
-            break
+        valid_run = None
+        for attempt in range(max_run_attempts):
+            try:
+                raw_res = client.generate_structured(
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_content}],
+                    schema=JudgeRunOutput,
+                    temperature=0.0
+                )
+                # Strictly validate dimensions against rubric (reject missing/extra/empty reasoning)
+                validate_judge_run_dimensions(raw_res, expected_dims)
+                valid_run = raw_res
+                break
+            except Exception as e:
+                logger.warning(f"Judge run {i + 1} attempt {attempt + 1}/{max_run_attempts} failed: {e}")
+                if attempt < max_run_attempts - 1:
+                    import time
+                    time.sleep(base_backoff * (2 ** attempt))
+
+        if valid_run is not None:
+            runs_output.append(valid_run)
+        else:
+            logger.error(f"Judge run {i + 1}/{num_runs} produced no valid output after {max_run_attempts} attempts.")
+
+    if not runs_output:
+        raise RuntimeError("Judge AI call failed: no valid runs produced")
 
     # Aggregate dimension scores using median across successful runs
-    weights = extract_rubric_weights(rubric_json)
     median_dimension_scores: Dict[str, int] = {}
     dimension_reasoning: Dict[str, dict] = {}
 
     for dim in weights:
         dim_scores_across_runs = []
         for r in runs_output:
-            ds_map = _get_dimension_scores_map(r)
-            dim_item = ds_map.get(dim)
-            if isinstance(dim_item, dict):
-                dim_scores_across_runs.append(dim_item.get("score", 5))
-            elif isinstance(dim_item, (int, float)):
-                dim_scores_across_runs.append(int(round(dim_item)))
-            else:
-                dim_scores_across_runs.append(5)
+            ds_map = validate_judge_run_dimensions(r, expected_dims)
+            dim_item = ds_map[dim]
+            dim_scores_across_runs.append(int(round(dim_item["score"])))
 
         med_score = int(round(statistics.median(dim_scores_across_runs)))
         median_dimension_scores[dim] = med_score
 
-        # Pick reasoning & evidence from run closest to median
-        best_run_map = _get_dimension_scores_map(runs_output[0])
-        dimension_reasoning[dim] = best_run_map.get(dim, {
-            "score": med_score,
-            "reasoning": "Evaluated against case rubric.",
-            "evidence": ""
-        })
+        best_run_map = validate_judge_run_dimensions(runs_output[0], expected_dims)
+        dimension_reasoning[dim] = best_run_map[dim]
 
     # Aggregate flaw evaluations
     flaw_results = []
@@ -378,9 +431,9 @@ def call_judge_ai(
     # Compute score variance across runs
     run_overall_scores = []
     for r in runs_output:
-        ds_map = _get_dimension_scores_map(r)
+        ds_map = validate_judge_run_dimensions(r, expected_dims)
         r_scores = {
-            dim: ds_map.get(dim, {}).get("score", 5) if isinstance(ds_map.get(dim), dict) else 5
+            dim: int(round(ds_map[dim]["score"]))
             for dim in weights
         }
         run_overall_scores.append(
