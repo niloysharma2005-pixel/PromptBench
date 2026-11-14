@@ -272,6 +272,14 @@ class PromptBenchTestCase(unittest.TestCase):
         cors_middlewares = [m for m in app.user_middleware if m.cls == CORSMiddleware]
         self.assertTrue(len(cors_middlewares) > 0)
 
+    def test_candidate_llm_mock_mode(self):
+        prompt = "Analyze Southeast Asia EV charging expansion opportunity."
+        context = "Market data for Vietnam and Thailand."
+        history = [{"role": "user", "content": "What is the TAM for EV chargers?"}]
+        response = call_helper_ai(prompt, context, history)
+        self.assertIn("Southeast Asia EV", response)
+        self.assertNotIn("churned users", response)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================
