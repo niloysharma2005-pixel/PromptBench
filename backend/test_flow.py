@@ -280,6 +280,20 @@ class PromptBenchTestCase(unittest.TestCase):
         self.assertIn("Southeast Asia EV", response)
         self.assertNotIn("churned users", response)
 
+    def test_evaluation_detail_schema_bounds(self):
+        from backend.app.schemas import EvaluationDetail, DimensionScores
+        detail = EvaluationDetail(
+            overall_score=85,
+            dimension_scores=DimensionScores(
+                clarifying_questions=8,
+                iteration_quality=9,
+                hallucination_catching=7,
+                final_answer_quality=9
+            ),
+            reasoning="Valid score >= 10 and <= 100."
+        )
+        self.assertEqual(detail.overall_score, 85)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================

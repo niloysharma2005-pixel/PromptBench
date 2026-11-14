@@ -78,7 +78,7 @@ class DimensionScores(BaseModel):
     final_answer_quality: int = Field(..., ge=0, le=10)
 
 class EvaluationDetail(BaseModel):
-    overall_score: int = Field(..., ge=0, le=10)
+    overall_score: int = Field(..., ge=0, le=100)
     dimension_scores: DimensionScores
     reasoning: str
 
