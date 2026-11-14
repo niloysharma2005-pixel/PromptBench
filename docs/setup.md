@@ -30,14 +30,19 @@ PromptBench includes helper batch scripts located in the `scripts/` directory an
    copy frontend\.env.example frontend\.env
    ```
 
-3. **Install Dependencies & Seed Database**:
+3. **Install Dependencies & Run Migrations**:
    ```cmd
    cd backend
    python -m venv venv
    .\venv\Scripts\activate
    pip install -r requirements.txt
-   python seed.py
    cd ..
+
+   # Run Alembic database migrations
+   alembic upgrade head
+
+   # Seed database with business case studies (non-destructive upsert)
+   python backend\seed.py
    ```
 
 4. **Install Frontend Dependencies**:
@@ -83,12 +88,16 @@ pip install -r requirements.txt
 # Configure environment
 cp .env.example .env
 # Edit .env with your DATABASE_URL, GEMINI_API_KEY, and JWT_SECRET_KEY
+cd ..
 
-# Seed database with the 5 business case studies
-python seed.py
+# Run database migrations
+alembic upgrade head
+
+# Seed database with business case studies (non-destructive upsert)
+python backend/seed.py
 
 # Start FastAPI server
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ### Step 3: Frontend Setup

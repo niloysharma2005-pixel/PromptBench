@@ -10,7 +10,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submissions = relationship("Submission", back_populates="user", cascade="all, delete-orphan")
 
@@ -26,7 +26,7 @@ class Question(Base):
     ground_truth_notes = Column(Text, nullable=False)
     difficulty = Column(String, nullable=False)  # 'easy' | 'medium' | 'hard'
     rubric_json = Column(JSONB, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submissions = relationship("Submission", back_populates="question", cascade="all, delete-orphan")
 
@@ -38,8 +38,8 @@ class Submission(Base):
     question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
     status = Column(String, default="in_progress")  # 'in_progress' | 'submitted' | 'evaluation_failed'
     final_answer_text = Column(Text, nullable=True)
-    started_at = Column(DateTime, server_default=func.now())
-    submitted_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="submissions")
     question = relationship("Question", back_populates="submissions")
@@ -57,7 +57,7 @@ class TranscriptTurn(Base):
     turn_index = Column(Integer, nullable=False)
     role = Column(String, nullable=False)  # 'user' | 'assistant'
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submission = relationship("Submission", back_populates="transcript_turns")
 
@@ -70,6 +70,6 @@ class Evaluation(Base):
     dimension_scores_json = Column(JSONB, nullable=True)
     judge_reasoning = Column(Text, nullable=True)
     anti_gaming_flags = Column(JSONB, nullable=True)  # List of string warnings
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submission = relationship("Submission", back_populates="evaluations")
