@@ -13,6 +13,7 @@ logger = logging.getLogger("judge_llm")
 PROMPT_VERSION = "v4.0"
 
 class DimensionScoreItem(BaseModel):
+    dimension_name: str = Field(..., description="The name of the rubric dimension")
     score: int = Field(..., ge=0, le=10, description="Score from 0 to 10 for this rubric dimension")
     reasoning: str = Field(..., min_length=1, description="Concise reasoning justifying the score")
     evidence: str = Field(default="", description="Direct quotation or evidence from the transcript or final answer")
@@ -24,9 +25,9 @@ class FlawEvaluationItem(BaseModel):
     evidence: str = Field(default="", description="Quotation from the conversation demonstrating appearance or catching")
 
 class JudgeRunOutput(BaseModel):
-    dimension_scores: Dict[str, DimensionScoreItem] = Field(
+    dimension_scores: List[DimensionScoreItem] = Field(
         ...,
-        description="Map of dimension name to score, reasoning, and evidence"
+        description="List of evaluations for each rubric dimension"
     )
     flaw_evaluations: List[FlawEvaluationItem] = Field(
         default_factory=list,
@@ -37,6 +38,30 @@ class JudgeRunOutput(BaseModel):
         min_length=1,
         description="Overall executive summary of candidate performance"
     )
+
+    from pydantic import field_validator
+    @field_validator("dimension_scores", mode="before")
+    @classmethod
+    def _coerce_dimension_scores(cls, v):
+        if isinstance(v, dict):
+            coerced = []
+            for dim_name, item in v.items():
+                if isinstance(item, dict):
+                    coerced.append({
+                        "dimension_name": dim_name,
+                        "score": item.get("score", 0),
+                        "reasoning": item.get("reasoning", "Evaluated against rubric."),
+                        "evidence": item.get("evidence", "")
+                    })
+                elif isinstance(item, (int, float)):
+                    coerced.append({
+                        "dimension_name": dim_name,
+                        "score": int(item),
+                        "reasoning": "Evaluated against rubric.",
+                        "evidence": ""
+                    })
+            return coerced
+        return v
 
 def parse_and_validate_judge_response(response_text: str) -> dict:
     """
@@ -189,6 +214,27 @@ def _build_judge_prompt(
 
     return system_prompt, user_content
 
+def _get_dimension_scores_map(run_dict: dict) -> Dict[str, dict]:
+    """
+    Normalizes dimension_scores from either list-of-items or dict-of-items into a dict keyed by dimension name.
+    """
+    raw = run_dict.get("dimension_scores", {})
+    if isinstance(raw, dict):
+        result = {}
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                result[k] = v
+            else:
+                result[k] = {"score": int(v), "reasoning": "Evaluated against rubric.", "evidence": ""}
+        return result
+    if isinstance(raw, list):
+        result = {}
+        for item in raw:
+            if isinstance(item, dict) and "dimension_name" in item:
+                result[item["dimension_name"]] = item
+        return result
+    return {}
+
 def call_judge_ai(
     prompt_text: str,
     context_data: str,
@@ -290,7 +336,7 @@ def call_judge_ai(
     for dim in weights:
         dim_scores_across_runs = []
         for r in runs_output:
-            ds_map = r.get("dimension_scores", {})
+            ds_map = _get_dimension_scores_map(r)
             dim_item = ds_map.get(dim)
             if isinstance(dim_item, dict):
                 dim_scores_across_runs.append(dim_item.get("score", 5))
@@ -303,8 +349,8 @@ def call_judge_ai(
         median_dimension_scores[dim] = med_score
 
         # Pick reasoning & evidence from run closest to median
-        best_run = runs_output[0]
-        dimension_reasoning[dim] = best_run.get("dimension_scores", {}).get(dim, {
+        best_run_map = _get_dimension_scores_map(runs_output[0])
+        dimension_reasoning[dim] = best_run_map.get(dim, {
             "score": med_score,
             "reasoning": "Evaluated against case rubric.",
             "evidence": ""
@@ -332,11 +378,11 @@ def call_judge_ai(
     # Compute score variance across runs
     run_overall_scores = []
     for r in runs_output:
-        r_scores = {}
-        for dim in weights:
-            item = r.get("dimension_scores", {}).get(dim, {})
-            score_val = item.get("score", 5) if isinstance(item, dict) else (item if isinstance(item, int) else 5)
-            r_scores[dim] = score_val
+        ds_map = _get_dimension_scores_map(r)
+        r_scores = {
+            dim: ds_map.get(dim, {}).get("score", 5) if isinstance(ds_map.get(dim), dict) else 5
+            for dim in weights
+        }
         run_overall_scores.append(
             calculate_overall_score(r_scores, rubric_json, not_applicable_dimensions=not_applicable_dims)
         )

@@ -540,7 +540,9 @@ class PromptBenchTestCase(unittest.TestCase):
         }
         """
         validated = parse_and_validate_judge_response(valid_input)
-        self.assertEqual(validated["dimension_scores"]["clarifying_questions"]["score"], 8)
+        self.assertIsInstance(validated["dimension_scores"], list)
+        dim_map = {item["dimension_name"]: item for item in validated["dimension_scores"]}
+        self.assertEqual(dim_map["clarifying_questions"]["score"], 8)
         self.assertEqual(validated["summary_reasoning"], "Strong problem solving with good verification.")
         self.assertEqual(len(validated["flaw_evaluations"]), 1)
         self.assertTrue(validated["flaw_evaluations"][0]["caught"])
@@ -548,7 +550,8 @@ class PromptBenchTestCase(unittest.TestCase):
         # Markdown wrapped JSON
         markdown_input = f"```json\n{valid_input}\n```"
         validated_md = parse_and_validate_judge_response(markdown_input)
-        self.assertEqual(validated_md["dimension_scores"]["clarifying_questions"]["score"], 8)
+        dim_md_map = {item["dimension_name"]: item for item in validated_md["dimension_scores"]}
+        self.assertEqual(dim_md_map["clarifying_questions"]["score"], 8)
 
         # Malformed JSON (should raise ValueError)
         with self.assertRaises(ValueError):
