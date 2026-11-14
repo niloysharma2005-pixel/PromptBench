@@ -4,14 +4,12 @@ import sys
 # Ensure backend directory is in python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.app.db import engine, Base, SessionLocal
+from backend.app.db import engine, SessionLocal
 from backend.app.models import Question
 
 def seed_database(db=None):
     is_local_session = False
     if db is None:
-        print("Initializing database schema...")
-        Base.metadata.create_all(bind=engine)
         db = SessionLocal()
         is_local_session = True
 

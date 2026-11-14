@@ -36,6 +36,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Run Database Migrations and Drift Check
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_test
+        run: |
+          alembic upgrade head
+          alembic check
+
       - name: Run Backend Test Suite
         env:
           DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_dev

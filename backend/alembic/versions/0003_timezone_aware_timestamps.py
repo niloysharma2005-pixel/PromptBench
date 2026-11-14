@@ -100,3 +100,4 @@ def downgrade() -> None:
         existing_server_default=sa.text('now()'),
         existing_nullable=True
     )
+

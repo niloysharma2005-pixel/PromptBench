@@ -25,6 +25,8 @@ if "RUN_LLM_TESTS" not in os.environ:
 # Enforce TEST_DATABASE_URL isolation
 dev_db_url = os.getenv("DATABASE_URL")
 test_db_url = os.getenv("TEST_DATABASE_URL")
+DEV_DATABASE_URL = dev_db_url
+ORIGINAL_TEST_DATABASE_URL = test_db_url
 
 if dev_db_url and test_db_url and dev_db_url.strip().rstrip("/") == test_db_url.strip().rstrip("/"):
     raise RuntimeError(
@@ -68,8 +70,13 @@ class PromptBenchTestCase(unittest.TestCase):
                 cls.has_real_db = False
         
         if cls.has_real_db:
-            print("Connecting to test PostgreSQL database and initializing tables...")
-            Base.metadata.create_all(bind=engine)
+            print("Connecting to test PostgreSQL database and applying Alembic migrations...")
+            from alembic.config import Config
+            from alembic import command
+            alembic_ini_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alembic.ini")
+            alembic_cfg = Config(alembic_ini_path)
+            alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+            command.upgrade(alembic_cfg, "head")
             cls.db = SessionLocal()
             
             # Setup seed question for testing
@@ -833,6 +840,17 @@ class PromptBenchTestCase(unittest.TestCase):
             "postgresql://postgres@localhost:5432/postgres",
             "postgresql://postgres@localhost:5432/promptbench_test"
         )
+
+    def test_active_engine_database_matches_test_db(self):
+        from sqlalchemy.engine.url import make_url
+        active_db_name = engine.url.database
+        test_url = ORIGINAL_TEST_DATABASE_URL or os.getenv("TEST_DATABASE_URL")
+        if test_url:
+            expected_test_db = make_url(test_url).database
+            self.assertEqual(active_db_name, expected_test_db, "Engine database must match TEST_DATABASE_URL database.")
+        if DEV_DATABASE_URL:
+            dev_db_name = make_url(DEV_DATABASE_URL).database
+            self.assertNotEqual(active_db_name, dev_db_name, "Engine database must NOT match development DATABASE_URL.")
 
 if __name__ == "__main__":
     unittest.main()

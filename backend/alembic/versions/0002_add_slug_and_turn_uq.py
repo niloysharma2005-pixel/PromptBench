@@ -45,3 +45,4 @@ def downgrade() -> None:
     op.drop_constraint('uq_submission_turn_index', 'transcript_turns', type_='unique')
     op.drop_index(op.f('ix_questions_slug'), table_name='questions')
     op.drop_column('questions', 'slug')
+

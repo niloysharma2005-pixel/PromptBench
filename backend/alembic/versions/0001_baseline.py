@@ -86,8 +86,5 @@ def upgrade() -> None:
     op.create_index(op.f('ix_evaluations_id'), 'evaluations', ['id'], unique=False)
 
 def downgrade() -> None:
-    op.drop_table('evaluations')
-    op.drop_table('transcript_turns')
-    op.drop_table('submissions')
-    op.drop_table('questions')
-    op.drop_table('users')
+    raise RuntimeError("Refusing to drop baseline tables")
+
