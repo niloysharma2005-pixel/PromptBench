@@ -55,3 +55,7 @@ pb-backups/
 PromptBench.zip
 *.zip
 *.tar.gz
+
+# Calibration and smoke outputs
+backend/calibration/output/
+calibration_results/
