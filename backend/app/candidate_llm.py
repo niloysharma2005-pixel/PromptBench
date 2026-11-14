@@ -1,4 +1,5 @@
 import logging
+from typing import Optional, List, Dict, Any
 from backend.app.config import GEMINI_API_KEY, RUN_LLM_TESTS
 from backend.app.llm_client import get_llm_client
 
@@ -14,13 +15,33 @@ Case Task:
 {prompt_text}
 
 Case Context:
-{context_data}
+{context_data}{flaw_instructions_block}
 """
 
-def call_helper_ai(prompt_text: str, context_data: str, history: list) -> str:
+def call_helper_ai(
+    prompt_text: str,
+    context_data: str,
+    history: list,
+    planted_flaws: Optional[List[Dict[str, Any]]] = None
+) -> str:
     """
     history format: [{"role": "user"|"assistant", "content": "..."}]
+    planted_flaws: list of dicts. The helper ONLY receives 'helper_instruction'.
     """
+    # Extract ONLY helper_instruction from planted_flaws (isolation guarantee)
+    flaw_instructions_block = ""
+    if planted_flaws:
+        instructions = [
+            f["helper_instruction"]
+            for f in planted_flaws
+            if isinstance(f, dict) and f.get("helper_instruction")
+        ]
+        if instructions:
+            flaw_instructions_block = (
+                "\n\nBehavioral guidance:\n"
+                + "\n".join(f"- {inst}" for inst in instructions)
+            )
+
     # If in test/mock mode or no API key, return a generic mock response utilizing prompt_text
     if not RUN_LLM_TESTS or not GEMINI_API_KEY:
         last_query = history[-1]["content"] if history else "your initial analysis"
@@ -32,9 +53,10 @@ def call_helper_ai(prompt_text: str, context_data: str, history: list) -> str:
 
     system_prompt = CANDIDATE_SYSTEM_PROMPT.format(
         prompt_text=prompt_text,
-        context_data=context_data
+        context_data=context_data,
+        flaw_instructions_block=flaw_instructions_block
     )
-    
+
     try:
         client = get_llm_client()
         return client.generate(

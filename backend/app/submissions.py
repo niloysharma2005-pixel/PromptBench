@@ -165,7 +165,8 @@ def add_message(
         reply = call_helper_ai(
             prompt_text=submission.question.prompt_text,
             context_data=submission.question.context_data,
-            history=history
+            history=history,
+            planted_flaws=submission.question.planted_flaws
         )
     except Exception as e:
         # If helper LLM fails, rollback the user turn we just added to keep transcript clean
@@ -244,7 +245,11 @@ def submit_answer(
             transcript=transcript_list,
             final_answer=submission.final_answer_text,
             ground_truth_notes=question.ground_truth_notes,
-            rubric_json=question.rubric_json
+            rubric_json=question.rubric_json,
+            planted_flaws=question.planted_flaws,
+            key_findings=question.key_findings,
+            red_herrings=question.red_herrings,
+            must_include=question.must_include
         )
         
         # Successful evaluation: Create evaluation record, update status to submitted.
@@ -255,8 +260,15 @@ def submit_answer(
             submission_id=submission.id,
             overall_score=eval_result["overall_score"],
             dimension_scores_json=eval_result["dimension_scores"],
+            dimension_reasoning_json=eval_result.get("dimension_reasoning"),
+            flaw_results_json=eval_result.get("flaw_results"),
+            raw_runs_json=eval_result.get("raw_runs"),
             judge_reasoning=eval_result["reasoning"],
             anti_gaming_flags=anti_gaming_flags,
+            model=eval_result.get("model"),
+            prompt_version=eval_result.get("prompt_version"),
+            judge_runs=eval_result.get("judge_runs"),
+            score_variance=eval_result.get("score_variance"),
             created_at=datetime.now(timezone.utc)
         )
         db.add(evaluation)
@@ -271,8 +283,14 @@ def submit_answer(
             submission_id=submission.id,
             overall_score=evaluation.overall_score,
             dimension_scores_json=evaluation.dimension_scores_json,
+            dimension_reasoning_json=evaluation.dimension_reasoning_json,
+            flaw_results_json=evaluation.flaw_results_json,
             judge_reasoning=evaluation.judge_reasoning,
             anti_gaming_flags=evaluation.anti_gaming_flags,
+            model=evaluation.model,
+            prompt_version=evaluation.prompt_version,
+            judge_runs=evaluation.judge_runs,
+            score_variance=evaluation.score_variance,
             created_at=evaluation.created_at,
             question_title=question.title,
             question_difficulty=question.difficulty,
