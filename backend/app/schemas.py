@@ -53,13 +53,13 @@ class SubmissionResponse(BaseModel):
         from_attributes = True
 
 class MessageCreate(BaseModel):
-    message: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1, max_length=2000)
 
 class MessageResponse(BaseModel):
     reply: str
 
 class SubmitFinal(BaseModel):
-    final_answer_text: str = Field(..., min_length=1)
+    final_answer_text: str = Field(..., min_length=1, max_length=8000)
 
 # Transcript Turn Schemas
 class TranscriptTurnResponse(BaseModel):

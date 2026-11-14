@@ -1,8 +1,10 @@
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from backend.app.config import RATE_LIMIT_MESSAGE, RATE_LIMIT_SUBMIT
+from backend.app.limiter import limiter
 from backend.app.db import get_db
 from backend.app.models import Submission, Question, TranscriptTurn, Evaluation
 from backend.app.schemas import SubmissionCreate, SubmissionResponse, MessageCreate, MessageResponse, SubmitFinal, EvaluationResponse
@@ -79,7 +81,9 @@ def get_submission(
     }
 
 @router.post("/{submission_id}/message", response_model=MessageResponse)
+@limiter.limit(RATE_LIMIT_MESSAGE)
 def add_message(
+    request: Request,
     submission_id: int,
     payload: MessageCreate,
     db: Session = Depends(get_db),
@@ -138,12 +142,12 @@ def add_message(
     # Save candidate's message
     user_turn = _save_turn_with_retry(submission.id, "user", payload.message)
 
-    # Fetch all turns for this submission to pass history to helper LLM
+    # Fetch all turns for this submission to pass history to helper LLM (capped to last 40 turns)
     turns = db.query(TranscriptTurn).filter(
         TranscriptTurn.submission_id == submission.id
     ).order_by(TranscriptTurn.turn_index.asc()).all()
     
-    history = [{"role": turn.role, "content": turn.content} for turn in turns]
+    history = [{"role": turn.role, "content": turn.content} for turn in turns[-40:]]
     
     try:
         reply = call_helper_ai(
@@ -166,7 +170,9 @@ def add_message(
     return {"reply": reply}
 
 @router.post("/{submission_id}/submit", response_model=EvaluationResponse)
+@limiter.limit(RATE_LIMIT_SUBMIT)
 def submit_answer(
+    request: Request,
     submission_id: int,
     payload: SubmitFinal,
     db: Session = Depends(get_db),

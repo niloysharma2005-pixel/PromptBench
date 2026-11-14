@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from backend.app.limiter import limiter
 from backend.app.auth import router as auth_router
 from backend.app.questions import router as questions_router
 from backend.app.submissions import router as submissions_router
@@ -10,6 +13,8 @@ from backend.app.config import validate_config
 validate_config()
 
 app = FastAPI(title="PromptBench API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware configuration
 # For production deployment, you would change these origins to match your domain

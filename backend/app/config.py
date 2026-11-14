@@ -11,6 +11,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL") or os.getenv("ANTHROPIC_MODEL") or "gemini-2.5-flash"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 RUN_LLM_TESTS = os.getenv("RUN_LLM_TESTS", "false").lower() == "true"
+RATE_LIMIT_MESSAGE = os.getenv("RATE_LIMIT_MESSAGE", "30/minute")
+RATE_LIMIT_SUBMIT = os.getenv("RATE_LIMIT_SUBMIT", "10/minute")
 
 # Backward compatibility aliases
 ANTHROPIC_API_KEY = GEMINI_API_KEY

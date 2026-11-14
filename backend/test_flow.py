@@ -251,6 +251,22 @@ class PromptBenchTestCase(unittest.TestCase):
         constraint_names = [c.name for c in table_args if hasattr(c, "name")]
         self.assertIn("uq_submission_turn_index", constraint_names)
 
+    def test_abuse_limits_validation(self):
+        from pydantic import ValidationError
+        from backend.app.schemas import MessageCreate, SubmitFinal
+
+        with self.assertRaises(ValidationError):
+            MessageCreate(message="a" * 2001)
+
+        valid_msg = MessageCreate(message="a" * 2000)
+        self.assertEqual(len(valid_msg.message), 2000)
+
+        with self.assertRaises(ValidationError):
+            SubmitFinal(final_answer_text="a" * 8001)
+
+        valid_sub = SubmitFinal(final_answer_text="a" * 8000)
+        self.assertEqual(len(valid_sub.final_answer_text), 8000)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================
