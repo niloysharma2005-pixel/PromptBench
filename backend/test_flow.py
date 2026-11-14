@@ -589,32 +589,30 @@ class PromptBenchTestCase(unittest.TestCase):
         )
         self.assertIn("Mocked Helper AI response", response)
 
-    @patch("backend.app.candidate_llm.client")
     @patch("backend.app.candidate_llm.RUN_LLM_TESTS", True)
-    def test_candidate_llm_gemini_call(self, mock_client):
-        mock_response = MagicMock()
-        mock_response.text = "Gemini helper answer"
-        mock_client.models.generate_content.return_value = mock_response
-
-        history = [
-            {"role": "user", "content": "What is churn?"},
-            {"role": "assistant", "content": "Churn is customer cancellation."},
-            {"role": "user", "content": "What caused it?"}
-        ]
-        res = call_helper_ai("Case prompt", "Case context", history)
-        self.assertEqual(res, "Gemini helper answer")
-        
-        # Verify call arguments
-        mock_client.models.generate_content.assert_called_once()
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        from backend.app.config import GEMINI_MODEL
-        self.assertEqual(call_kwargs["model"], GEMINI_MODEL)
-        contents = call_kwargs["contents"]
-        self.assertEqual(len(contents), 3)
-        self.assertEqual(contents[0].role, "user")
-        self.assertEqual(contents[1].role, "model") # mapped from assistant to model
-        self.assertEqual(contents[2].role, "user")
-        self.assertEqual(call_kwargs["config"].max_output_tokens, 1000)
+    @patch("backend.app.candidate_llm.GEMINI_API_KEY", "dummy-key")
+    def test_candidate_llm_gemini_call(self):
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+        mock_client.generate.return_value = "Gemini helper answer"
+        set_llm_client(mock_client)
+        try:
+            history = [
+                {"role": "user", "content": "What is churn?"},
+                {"role": "assistant", "content": "Churn is customer cancellation."},
+                {"role": "user", "content": "What caused it?"}
+            ]
+            res = call_helper_ai("Case prompt", "Case context", history)
+            self.assertEqual(res, "Gemini helper answer")
+            
+            mock_client.generate.assert_called_once()
+            call_kwargs = mock_client.generate.call_args.kwargs
+            self.assertIn("Case prompt", call_kwargs["system"])
+            self.assertIn("Case context", call_kwargs["system"])
+            self.assertEqual(call_kwargs["messages"], history)
+            self.assertEqual(call_kwargs["max_tokens"], 1000)
+        finally:
+            set_llm_client(None)
 
     def test_judge_llm_mock_fallback(self):
         # When RUN_LLM_TESTS is False, returns mock evaluation dict
@@ -629,11 +627,12 @@ class PromptBenchTestCase(unittest.TestCase):
         self.assertEqual(res["overall_score"], 82)
         self.assertIn("Mocked Judge evaluation", res["reasoning"])
 
-    @patch("backend.app.judge_llm.client")
     @patch("backend.app.judge_llm.RUN_LLM_TESTS", True)
-    def test_judge_llm_gemini_call(self, mock_client):
-        mock_response = MagicMock()
-        mock_response.text = json.dumps({
+    @patch("backend.app.judge_llm.GEMINI_API_KEY", "dummy-key")
+    def test_judge_llm_gemini_call(self):
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+        mock_client.generate.return_value = json.dumps({
             "overall_score": 95,
             "dimension_scores": {
                 "clarifying_questions": 10,
@@ -643,27 +642,27 @@ class PromptBenchTestCase(unittest.TestCase):
             },
             "reasoning": "Outstanding performance evaluated by Gemini."
         })
-        mock_client.models.generate_content.return_value = mock_response
+        set_llm_client(mock_client)
+        try:
+            res = call_judge_ai(
+                prompt_text="Case prompt",
+                context_data="Case context",
+                transcript=[{"role": "user", "content": "What caused churn?"}],
+                final_answer="Feature X removal caused churn.",
+                ground_truth_notes="Ground truth",
+                rubric_json={"weights": "equal"}
+            )
+            self.assertEqual(res["overall_score"], 95)
+            self.assertEqual(res["dimension_scores"]["clarifying_questions"], 10)
+            self.assertEqual(res["reasoning"], "Outstanding performance evaluated by Gemini.")
 
-        res = call_judge_ai(
-            prompt_text="Case prompt",
-            context_data="Case context",
-            transcript=[{"role": "user", "content": "What caused churn?"}],
-            final_answer="Feature X removal caused churn.",
-            ground_truth_notes="Ground truth",
-            rubric_json={"weights": "equal"}
-        )
-        self.assertEqual(res["overall_score"], 95)
-        self.assertEqual(res["dimension_scores"]["clarifying_questions"], 10)
-        self.assertEqual(res["reasoning"], "Outstanding performance evaluated by Gemini.")
-
-        # Verify call arguments
-        mock_client.models.generate_content.assert_called_once()
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        from backend.app.config import GEMINI_MODEL
-        self.assertEqual(call_kwargs["model"], GEMINI_MODEL)
-        self.assertEqual(call_kwargs["config"].max_output_tokens, 1500)
-        self.assertEqual(call_kwargs["config"].response_mime_type, "application/json")
+            mock_client.generate.assert_called_once()
+            call_kwargs = mock_client.generate.call_args.kwargs
+            self.assertEqual(call_kwargs["temperature"], 0.0)
+            self.assertEqual(call_kwargs["max_tokens"], 1500)
+            self.assertEqual(call_kwargs["response_mime_type"], "application/json")
+        finally:
+            set_llm_client(None)
 
 if __name__ == "__main__":
     unittest.main()

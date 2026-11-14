@@ -1,21 +1,12 @@
-import os
 import json
 import re
 import logging
 from typing import Dict, List
 from pydantic import BaseModel, Field, ValidationError
-from google import genai
-from google.genai import types
-from backend.app.config import GEMINI_API_KEY, GEMINI_MODEL, RUN_LLM_TESTS
+from backend.app.config import GEMINI_API_KEY, RUN_LLM_TESTS
+from backend.app.llm_client import get_llm_client
 
 logger = logging.getLogger("judge_llm")
-
-if not GEMINI_MODEL:
-    raise ValueError("Configuration Error: GEMINI_MODEL is required.")
-
-client = None
-if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Strict Pydantic schemas for Judge output validation
 class DimensionScoresModel(BaseModel):
@@ -90,7 +81,6 @@ def parse_and_validate_judge_response(response_text: str) -> dict:
     # 4. Pydantic validation
     try:
         validated = JudgeOutput(**data)
-        # Convert Pydantic model to dict
         return validated.model_dump()
     except ValidationError as e:
         logger.error(f"Validation failed for parsed Judge JSON. Data: {data}. Error: {e}")
@@ -105,10 +95,10 @@ def call_judge_ai(
     rubric_json: dict
 ) -> dict:
     """
-    Prepares prompts, calls the Judge LLM, parses and validates the response.
+    Prepares prompts, calls the Judge LLM via LLMClient, parses and validates the response.
     """
-    # Fallback to mock response in test mode or when Gemini client is not configured
-    if not RUN_LLM_TESTS or not client:
+    # Fallback to mock response in test mode or when Gemini API key is not configured
+    if not RUN_LLM_TESTS or not GEMINI_API_KEY:
         return {
             "overall_score": 82,
             "dimension_scores": {
@@ -139,16 +129,14 @@ def call_judge_ai(
     )
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=user_content,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=1500,
-                response_mime_type="application/json",
-            )
+        client = get_llm_client()
+        raw_text = client.generate(
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+            temperature=0.0,
+            max_tokens=1500,
+            response_mime_type="application/json"
         )
-        raw_text = response.text or ""
         return parse_and_validate_judge_response(raw_text)
     except Exception as e:
         logger.error(f"Error in call_judge_ai: {e}")

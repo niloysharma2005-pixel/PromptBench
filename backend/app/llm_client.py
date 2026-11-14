@@ -13,7 +13,8 @@ class LLMClient(ABC):
         system: str,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = 1500
+        max_tokens: int = 1500,
+        response_mime_type: Optional[str] = None
     ) -> str:
         """
         Generate completion from the LLM provider.
@@ -38,7 +39,8 @@ class GeminiClient(LLMClient):
         system: str,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = 1500
+        max_tokens: int = 1500,
+        response_mime_type: Optional[str] = None
     ) -> str:
         if not self.client:
             raise RuntimeError("Gemini client is not initialized. Ensure GEMINI_API_KEY is set.")
@@ -54,11 +56,15 @@ class GeminiClient(LLMClient):
                 )
             )
 
-        config = types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+        config_args = {
+            "system_instruction": system,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if response_mime_type:
+            config_args["response_mime_type"] = response_mime_type
+
+        config = types.GenerateContentConfig(**config_args)
 
         response = self.client.models.generate_content(
             model=self.model,
@@ -74,3 +80,7 @@ def get_llm_client() -> LLMClient:
     if _default_client is None:
         _default_client = GeminiClient()
     return _default_client
+
+def set_llm_client(client: Optional[LLMClient]) -> None:
+    global _default_client
+    _default_client = client
