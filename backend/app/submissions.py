@@ -122,11 +122,6 @@ def add_message(
     db.refresh(user_turn)
 
     # Fetch all turns for this submission to pass history to helper LLM
-    db_turns = db.query(TranscriptTurn).filter(
-        TranscriptTurn.submission_id == submission.id
-    ).order_index = TranscriptTurn.turn_index.asc()
-    
-    # Wait, we need to order them correctly
     turns = db.query(TranscriptTurn).filter(
         TranscriptTurn.submission_id == submission.id
     ).order_by(TranscriptTurn.turn_index.asc()).all()
