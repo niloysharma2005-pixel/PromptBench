@@ -200,6 +200,12 @@ def seed_database(db=None):
                 existing.context_data = q_data["context_data"]
                 existing.ground_truth_notes = q_data["ground_truth_notes"]
                 existing.rubric_json = q_data["rubric_json"]
+                existing.summary = q_data.get("summary")
+                existing.planted_flaws = q_data.get("planted_flaws")
+                existing.key_findings = q_data.get("key_findings")
+                existing.red_herrings = q_data.get("red_herrings")
+                existing.must_include = q_data.get("must_include")
+                existing.reveal_text = q_data.get("reveal_text")
             else:
                 new_q = Question(**q_data)
                 db.add(new_q)

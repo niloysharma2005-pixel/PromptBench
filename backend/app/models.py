@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, func, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Float, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from backend.app.db import Base
@@ -26,6 +26,12 @@ class Question(Base):
     ground_truth_notes = Column(Text, nullable=False)
     difficulty = Column(String, nullable=False)  # 'easy' | 'medium' | 'hard'
     rubric_json = Column(JSONB, nullable=False)
+    summary = Column(Text, nullable=True)
+    planted_flaws = Column(JSONB, nullable=True)
+    key_findings = Column(JSONB, nullable=True)
+    red_herrings = Column(JSONB, nullable=True)
+    must_include = Column(JSONB, nullable=True)
+    reveal_text = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submissions = relationship("Submission", back_populates="question", cascade="all, delete-orphan")
@@ -68,8 +74,15 @@ class Evaluation(Base):
     submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False)
     overall_score = Column(Integer, nullable=True)
     dimension_scores_json = Column(JSONB, nullable=True)
+    dimension_reasoning_json = Column(JSONB, nullable=True)
+    flaw_results_json = Column(JSONB, nullable=True)
+    raw_runs_json = Column(JSONB, nullable=True)
     judge_reasoning = Column(Text, nullable=True)
     anti_gaming_flags = Column(JSONB, nullable=True)  # List of string warnings
+    model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    judge_runs = Column(Integer, nullable=True)
+    score_variance = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submission = relationship("Submission", back_populates="evaluations")

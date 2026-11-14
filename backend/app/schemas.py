@@ -19,6 +19,7 @@ class Token(BaseModel):
 # Question Schemas
 class QuestionList(BaseModel):
     id: int
+    slug: Optional[str] = None
     title: str
     category: str
     difficulty: str
@@ -28,11 +29,14 @@ class QuestionList(BaseModel):
 
 class QuestionDetail(BaseModel):
     id: int
+    slug: Optional[str] = None
     title: str
     category: str
     difficulty: str
     prompt_text: str
     context_data: str
+    summary: Optional[str] = None
+    reveal_text: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -87,9 +91,15 @@ class EvaluationResponse(BaseModel):
     submission_id: int
     overall_score: Optional[int]
     dimension_scores_json: Optional[Dict[str, int]]
+    dimension_reasoning_json: Optional[Dict[str, Any]] = None
+    flaw_results_json: Optional[List[Dict[str, Any]]] = None
     judge_reasoning: Optional[str]
     anti_gaming_flags: Optional[List[str]]
     created_at: datetime
+    model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    judge_runs: Optional[int] = None
+    score_variance: Optional[float] = None
     question_title: Optional[str] = None
     question_difficulty: Optional[str] = None
     question_category: Optional[str] = None
