@@ -194,7 +194,7 @@ PromptBench/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                 # GitHub Actions CI pipeline
-├── Docs/
+├── docs/
 │   ├── PromptBench Pitch.pptx     # Team Pitch Presentation
 │   ├── PromptBench_Project_Proposal.docx # Project Proposal
 │   ├── architecture.md            # Architectural deep-dive & diagrams
