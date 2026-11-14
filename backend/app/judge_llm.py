@@ -406,19 +406,56 @@ def call_judge_ai(
         med_score = int(round(statistics.median(dim_scores_across_runs)))
         median_dimension_scores[dim] = med_score
 
-        best_run_map = validate_judge_run_dimensions(runs_output[0], expected_dims)
-        dimension_reasoning[dim] = best_run_map[dim]
+        # Pick reasoning & evidence from the run whose score is closest to the median for this dimension
+        closest_run = min(
+            runs_output,
+            key=lambda r: abs(validate_judge_run_dimensions(r, expected_dims)[dim]["score"] - med_score)
+        )
+        dimension_reasoning[dim] = validate_judge_run_dimensions(closest_run, expected_dims)[dim]
 
-    # Aggregate flaw evaluations
+    # Aggregate flaw evaluations via majority vote across valid runs
+    # ties -> not caught / appeared only if >=half
     flaw_results = []
-    if runs_output:
+    if planted_flaws:
+        num_valid_runs = len(runs_output)
+        for f in planted_flaws:
+            f_id = f.get("id", "flaw_1")
+            appeared_votes = []
+            caught_votes = []
+            evidences = []
+
+            for r in runs_output:
+                for fe in r.get("flaw_evaluations", []):
+                    if isinstance(fe, dict) and fe.get("flaw_id") == f_id:
+                        appeared_votes.append(bool(fe.get("appeared", False)))
+                        caught_votes.append(bool(fe.get("caught", False)))
+                        if fe.get("evidence"):
+                            evidences.append(fe["evidence"])
+                        break
+
+            app_count = sum(1 for v in appeared_votes if v)
+            ctg_count = sum(1 for v in caught_votes if v)
+
+            # appeared if >= half
+            agg_appeared = (app_count / num_valid_runs >= 0.5) if num_valid_runs > 0 else False
+            # ties -> not caught (strictly > half)
+            agg_caught = (ctg_count / num_valid_runs > 0.5) if num_valid_runs > 0 else False
+
+            flaw_results.append({
+                "flaw_id": f_id,
+                "appeared": agg_appeared,
+                "caught": agg_caught,
+                "evidence": evidences[0] if evidences else ""
+            })
+    elif runs_output:
         flaw_results = runs_output[0].get("flaw_evaluations", [])
 
-    # If planted flaws exist, but none appeared in transcript, mark hallucination_catching as not applicable
+    # If planted flaws exist, but none appeared in transcript (via aggregated appeared),
+    # mark hallucination_catching as not applicable
     not_applicable_dims = []
     if planted_flaws and len(planted_flaws) > 0:
-        flaw_appeared = any(f.get("appeared", False) for f in flaw_results)
-        if not flaw_appeared and "hallucination_catching" in weights:
+        any_flaw_appeared = any(f.get("appeared", False) for f in flaw_results)
+        if not any_flaw_appeared and "hallucination_catching" in weights:
             not_applicable_dims.append("hallucination_catching")
 
     # Compute overall score server-side from median scores with renormalised weights
@@ -441,7 +478,14 @@ def call_judge_ai(
         )
 
     score_variance = float(round(statistics.pvariance(run_overall_scores), 2)) if len(run_overall_scores) > 1 else 0.0
-    summary_reasoning = runs_output[0].get("summary_reasoning", "Completed evaluation.")
+
+    # Pick summary_reasoning from the run whose overall score is closest to the median overall score
+    med_overall = int(round(statistics.median(run_overall_scores)))
+    closest_overall_run_idx = min(
+        range(len(runs_output)),
+        key=lambda idx: abs(run_overall_scores[idx] - med_overall)
+    )
+    summary_reasoning = runs_output[closest_overall_run_idx].get("summary_reasoning", "Completed evaluation.")
 
     return {
         "overall_score": overall_score,

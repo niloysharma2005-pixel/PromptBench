@@ -1056,6 +1056,144 @@ class PromptBenchTestCase(unittest.TestCase):
         finally:
             set_llm_client(None)
 
+    @patch("backend.app.judge_llm.RUN_LLM_TESTS", True)
+    @patch("backend.app.judge_llm.GEMINI_API_KEY", "dummy-key")
+    def test_judge_aggregation_disagreeing_runs_median_reasoning_and_flaws(self):
+        """
+        Verify that:
+        1. Dimension reasoning comes from the run closest to the median score, not run 0.
+        2. Flaw appeared/caught use majority vote (ties -> not caught / appeared only if >= half).
+        3. Hallucination_catching is marked NA when aggregated appeared is False.
+        """
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+
+        # 3 runs that disagree
+        run1 = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 6, "reasoning": "Weak questioning"},
+                {"dimension_name": "iteration_quality", "score": 7, "reasoning": "Moderate iteration"},
+                {"dimension_name": "hallucination_catching", "score": 5, "reasoning": "Missed flaw"},
+                {"dimension_name": "final_answer_quality", "score": 6, "reasoning": "Weak answer"}
+            ],
+            "flaw_evaluations": [
+                {"flaw_id": "flaw_1", "appeared": True, "caught": True, "evidence": "Caught in run 1"}
+            ],
+            "summary_reasoning": "Run 1 summary"
+        }
+        run2 = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "Good questioning"},
+                {"dimension_name": "iteration_quality", "score": 8, "reasoning": "Good iteration"},
+                {"dimension_name": "hallucination_catching", "score": 8, "reasoning": "Partially caught"},
+                {"dimension_name": "final_answer_quality", "score": 8, "reasoning": "Good answer"}
+            ],
+            "flaw_evaluations": [
+                {"flaw_id": "flaw_1", "appeared": True, "caught": False, "evidence": "Appeared in run 2"}
+            ],
+            "summary_reasoning": "Run 2 summary"
+        }
+        run3 = {
+            "dimension_scores": [
+                {"dimension_name": "clarifying_questions", "score": 10, "reasoning": "Exemplary questioning"},
+                {"dimension_name": "iteration_quality", "score": 9, "reasoning": "Superb iteration"},
+                {"dimension_name": "hallucination_catching", "score": 9, "reasoning": "Caught thoroughly"},
+                {"dimension_name": "final_answer_quality", "score": 9, "reasoning": "Superb answer"}
+            ],
+            "flaw_evaluations": [
+                {"flaw_id": "flaw_1", "appeared": False, "caught": False, "evidence": "Did not appear"}
+            ],
+            "summary_reasoning": "Run 3 summary"
+        }
+        mock_client.generate_structured.side_effect = [run1, run2, run3]
+        set_llm_client(mock_client)
+        try:
+            rubric = {
+                "dimensions": [
+                    {"name": "clarifying_questions", "weight": 0.25},
+                    {"name": "iteration_quality", "weight": 0.25},
+                    {"name": "hallucination_catching", "weight": 0.25},
+                    {"name": "final_answer_quality", "weight": 0.25}
+                ]
+            }
+            res = call_judge_ai(
+                prompt_text="task",
+                context_data="ctx",
+                transcript=[],
+                final_answer="ans",
+                ground_truth_notes="gt",
+                rubric_json=rubric,
+                planted_flaws=[{"id": "flaw_1", "helper_instruction": "mislead"}],
+                judge_runs=3
+            )
+
+            # clarifying_questions scores: [6, 8, 10] -> median 8
+            self.assertEqual(res["dimension_scores"]["clarifying_questions"], 8)
+            # Must pick reasoning from Run 2 (score 8), NOT Run 1 (score 6)
+            self.assertEqual(res["dimension_reasoning"]["clarifying_questions"]["reasoning"], "Good questioning")
+
+            # Flaw votes:
+            # appeared: [True, True, False] -> 2/3 >= 0.5 -> True
+            # caught: [True, False, False] -> 1/3 <= 0.5 -> False (ties/minority -> not caught)
+            self.assertEqual(len(res["flaw_results"]), 1)
+            self.assertTrue(res["flaw_results"][0]["appeared"])
+            self.assertFalse(res["flaw_results"][0]["caught"])
+
+            # summary_reasoning comes from run closest to median overall score
+            self.assertIn("Run 2 summary", res["reasoning"])
+        finally:
+            set_llm_client(None)
+
+    @patch("backend.app.judge_llm.RUN_LLM_TESTS", True)
+    @patch("backend.app.judge_llm.GEMINI_API_KEY", "dummy-key")
+    def test_judge_na_decision_uses_aggregated_appeared(self):
+        """
+        If 2 of 3 runs say flaw did NOT appear, aggregated appeared is False,
+        so hallucination_catching is marked not applicable.
+        """
+        from backend.app.llm_client import LLMClient, set_llm_client
+        mock_client = MagicMock(spec=LLMClient)
+
+        def make_run(appeared):
+            return {
+                "dimension_scores": [
+                    {"dimension_name": "clarifying_questions", "score": 8, "reasoning": "ok"},
+                    {"dimension_name": "iteration_quality", "score": 8, "reasoning": "ok"},
+                    {"dimension_name": "hallucination_catching", "score": 8, "reasoning": "ok"},
+                    {"dimension_name": "final_answer_quality", "score": 8, "reasoning": "ok"}
+                ],
+                "flaw_evaluations": [
+                    {"flaw_id": "flaw_1", "appeared": appeared, "caught": False, "evidence": "..."}
+                ],
+                "summary_reasoning": "summary"
+            }
+
+        # 1 True, 2 False -> aggregated appeared is False (1/3 < 0.5)
+        mock_client.generate_structured.side_effect = [make_run(True), make_run(False), make_run(False)]
+        set_llm_client(mock_client)
+        try:
+            rubric = {
+                "dimensions": [
+                    {"name": "clarifying_questions", "weight": 0.25},
+                    {"name": "iteration_quality", "weight": 0.25},
+                    {"name": "hallucination_catching", "weight": 0.25},
+                    {"name": "final_answer_quality", "weight": 0.25}
+                ]
+            }
+            res = call_judge_ai(
+                prompt_text="task",
+                context_data="ctx",
+                transcript=[],
+                final_answer="ans",
+                ground_truth_notes="gt",
+                rubric_json=rubric,
+                planted_flaws=[{"id": "flaw_1", "helper_instruction": "mislead"}],
+                judge_runs=3
+            )
+            self.assertFalse(res["flaw_results"][0]["appeared"])
+        finally:
+            set_llm_client(None)
+
     def test_injection_hardening_sanitizes_xml_tags(self):
         from backend.app.judge_llm import sanitize_tagged_content
         malicious_input = (
