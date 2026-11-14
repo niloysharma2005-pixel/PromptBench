@@ -329,27 +329,6 @@ def validate_judge_run_dimensions(run_dict: dict, expected_dimensions: Any) -> D
 
     return seen_dims
 
-def _get_dimension_scores_map(run_dict: dict) -> Dict[str, dict]:
-    """
-    Normalizes dimension_scores from either list-of-items or dict-of-items into a dict keyed by dimension name.
-    """
-    raw = run_dict.get("dimension_scores", {})
-    if isinstance(raw, dict):
-        result = {}
-        for k, v in raw.items():
-            if isinstance(v, dict):
-                result[k] = v
-            else:
-                result[k] = {"dimension_name": k, "score": int(v), "reasoning": "Evaluated against rubric.", "evidence": ""}
-        return result
-    if isinstance(raw, list):
-        result = {}
-        for item in raw:
-            if isinstance(item, dict) and "dimension_name" in item:
-                result[item["dimension_name"]] = item
-        return result
-    return {}
-
 def call_judge_ai(
     prompt_text: str,
     context_data: str,
