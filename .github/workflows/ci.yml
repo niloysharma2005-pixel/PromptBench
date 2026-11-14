@@ -10,6 +10,16 @@ jobs:
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_dev
+      TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_test
+      GEMINI_MODEL: gemini-2.5-flash
+      GEMINI_API_KEY: dummy-test-key
+      ANTHROPIC_MODEL: gemini-2.5-flash
+      ANTHROPIC_API_KEY: dummy-test-key
+      JWT_SECRET_KEY: test-jwt-secret-key-must-be-long-and-random-321
+      RUN_LLM_TESTS: "false"
+      ENV: testing
     services:
       postgres:
         image: postgres:16
@@ -36,6 +46,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Create Development Database for Isolation
+        run: |
+          python -c "import psycopg2; from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT; conn = psycopg2.connect('${{ env.TEST_DATABASE_URL }}'); conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT); cur = conn.cursor(); cur.execute('CREATE DATABASE promptbench_dev;'); cur.close(); conn.close()"
+
       - name: Run Database Migrations and Drift Check
         env:
           DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_test
@@ -44,16 +58,6 @@ jobs:
           alembic check
 
       - name: Run Backend Test Suite
-        env:
-          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_dev
-          TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/promptbench_test
-          GEMINI_MODEL: gemini-2.5-flash
-          GEMINI_API_KEY: dummy-test-key
-          ANTHROPIC_MODEL: gemini-2.5-flash
-          ANTHROPIC_API_KEY: dummy-test-key
-          JWT_SECRET_KEY: test-jwt-secret-key-must-be-long-and-random-321
-          RUN_LLM_TESTS: "false"
-          ENV: testing
         run: |
           python backend/test_flow.py
 
