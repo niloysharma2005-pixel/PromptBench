@@ -256,13 +256,24 @@ def submit_answer(
         # To avoid duplicates on retry success, delete any existing failed evaluation entries (normally none should exist)
         db.query(Evaluation).filter(Evaluation.submission_id == submission.id).delete()
         
+        raw_runs_payload = {
+            "runs": eval_result.get("raw_runs"),
+            "adjustments": eval_result.get("adjustments", []),
+            "score_spread": {
+                "std_dev": eval_result.get("score_std_dev", 0.0),
+                "min": eval_result.get("score_min"),
+                "max": eval_result.get("score_max"),
+                "variance": eval_result.get("score_variance", 0.0)
+            }
+        }
+
         evaluation = Evaluation(
             submission_id=submission.id,
             overall_score=eval_result["overall_score"],
             dimension_scores_json=eval_result["dimension_scores"],
             dimension_reasoning_json=eval_result.get("dimension_reasoning"),
             flaw_results_json=eval_result.get("flaw_results"),
-            raw_runs_json=eval_result.get("raw_runs"),
+            raw_runs_json=raw_runs_payload,
             judge_reasoning=eval_result["reasoning"],
             anti_gaming_flags=anti_gaming_flags,
             model=eval_result.get("model"),
@@ -291,6 +302,9 @@ def submit_answer(
             prompt_version=evaluation.prompt_version,
             judge_runs=evaluation.judge_runs,
             score_variance=evaluation.score_variance,
+            score_std_dev=eval_result.get("score_std_dev"),
+            score_min=eval_result.get("score_min"),
+            score_max=eval_result.get("score_max"),
             created_at=evaluation.created_at,
             question_title=question.title,
             question_difficulty=question.difficulty,

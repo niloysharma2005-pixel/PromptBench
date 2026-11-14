@@ -99,7 +99,10 @@ class EvaluationResponse(BaseModel):
     model: Optional[str] = None
     prompt_version: Optional[str] = None
     judge_runs: Optional[int] = None
-    score_variance: Optional[float] = None
+    score_variance: Optional[float] = Field(None, description="Score variance across judge runs")
+    score_std_dev: Optional[float] = Field(None, description="Standard deviation across judge runs (+/- N points)")
+    score_min: Optional[int] = Field(None, description="Minimum overall score across judge runs")
+    score_max: Optional[int] = Field(None, description="Maximum overall score across judge runs")
     question_title: Optional[str] = None
     question_difficulty: Optional[str] = None
     question_category: Optional[str] = None

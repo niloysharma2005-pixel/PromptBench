@@ -863,6 +863,9 @@ class PromptBenchTestCase(unittest.TestCase):
             self.assertEqual(res["reasoning"], "Outstanding performance evaluated by Gemini.")
             self.assertEqual(res["judge_runs"], 1)
             self.assertIn("score_variance", res)
+            self.assertIn("score_std_dev", res)
+            self.assertIn("score_min", res)
+            self.assertIn("score_max", res)
             self.assertIn("raw_runs", res)
             self.assertIn("prompt_version", res)
 
@@ -1258,6 +1261,32 @@ class PromptBenchTestCase(unittest.TestCase):
         self.assertIn("3-5:", JUDGE_SYSTEM_PROMPT)
         self.assertIn("6-8:", JUDGE_SYSTEM_PROMPT)
         self.assertIn("9-10:", JUDGE_SYSTEM_PROMPT)
+
+    def test_score_spread_std_dev_min_max_and_api_schema(self):
+        from backend.app.schemas import EvaluationResponse
+        field_info = EvaluationResponse.model_fields["score_std_dev"]
+        self.assertIn("+/- N points", field_info.description)
+
+        from backend.app.judge_llm import call_judge_ai
+        res = call_judge_ai(
+            prompt_text="task",
+            context_data="ctx",
+            transcript=[],
+            final_answer="ans",
+            ground_truth_notes="gt",
+            rubric_json={
+                "dimensions": [
+                    {"name": "clarifying_questions", "weight": 0.5},
+                    {"name": "iteration_quality", "weight": 0.5}
+                ]
+            }
+        )
+        self.assertIn("score_std_dev", res)
+        self.assertIn("score_min", res)
+        self.assertIn("score_max", res)
+        self.assertEqual(res["score_std_dev"], 0.0)
+        self.assertEqual(res["score_min"], 80)
+        self.assertEqual(res["score_max"], 80)
 
     def test_injection_hardening_sanitizes_xml_tags(self):
         from backend.app.judge_llm import sanitize_tagged_content

@@ -73,6 +73,15 @@ def get_submission_evaluation(
     
     question = submission.question
     
+    raw_data = evaluation.raw_runs_json if isinstance(evaluation.raw_runs_json, dict) else {}
+    score_spread = raw_data.get("score_spread", {}) if isinstance(raw_data, dict) else {}
+    score_std_dev = score_spread.get("std_dev")
+    score_min = score_spread.get("min")
+    score_max = score_spread.get("max")
+    if score_std_dev is None and evaluation.score_variance is not None:
+        import math
+        score_std_dev = float(round(math.sqrt(evaluation.score_variance), 2))
+
     return EvaluationResponse(
         id=evaluation.id,
         submission_id=submission.id,
@@ -86,6 +95,9 @@ def get_submission_evaluation(
         prompt_version=evaluation.prompt_version,
         judge_runs=evaluation.judge_runs,
         score_variance=evaluation.score_variance,
+        score_std_dev=score_std_dev,
+        score_min=score_min,
+        score_max=score_max,
         created_at=evaluation.created_at,
         question_title=question.title,
         question_difficulty=question.difficulty,

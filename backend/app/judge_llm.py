@@ -413,7 +413,10 @@ def call_judge_ai(
             "model": GEMINI_MODEL,
             "prompt_version": PROMPT_VERSION,
             "judge_runs": 1,
-            "score_variance": 0.0
+            "score_variance": 0.0,
+            "score_std_dev": 0.0,
+            "score_min": overall,
+            "score_max": overall
         }
 
     system_prompt, user_content = _build_judge_prompt(
@@ -559,6 +562,9 @@ def call_judge_ai(
         )
 
     score_variance = float(round(statistics.pvariance(run_overall_scores), 2)) if len(run_overall_scores) > 1 else 0.0
+    score_std_dev = float(round(statistics.pstdev(run_overall_scores), 2)) if len(run_overall_scores) > 1 else 0.0
+    score_min = int(min(run_overall_scores)) if run_overall_scores else overall_score
+    score_max = int(max(run_overall_scores)) if run_overall_scores else overall_score
 
     # Pick summary_reasoning from the run whose overall score is closest to the median overall score
     med_overall = int(round(statistics.median(run_overall_scores)))
@@ -579,5 +585,8 @@ def call_judge_ai(
         "model": GEMINI_MODEL,
         "prompt_version": PROMPT_VERSION,
         "judge_runs": len(runs_output),
-        "score_variance": score_variance
+        "score_variance": score_variance,
+        "score_std_dev": score_std_dev,
+        "score_min": score_min,
+        "score_max": score_max
     }
