@@ -378,7 +378,7 @@ class PromptBenchTestCase(unittest.TestCase):
         # Submit retry
         retry_res = self.client.post(
             f"/api/submissions/{sub_id}/submit", 
-            json={"final_answer_text": "This should not overwrite or add transcript turns"}, 
+            json={"final_answer_text": "Refined Final Answer on Retry"}, 
             headers=headers
         )
         self.assertEqual(retry_res.status_code, 200)
@@ -387,9 +387,9 @@ class PromptBenchTestCase(unittest.TestCase):
         # Verify DB updates
         self.db.refresh(db_sub)
         self.assertEqual(db_sub.status, "submitted")
-        self.assertEqual(db_sub.final_answer_text, "Attempt 1 Final Answer") # Should keep original final answer text
-        self.assertEqual(db_sub.started_at, orig_started_at) # Should keep original started_at
-        self.assertEqual(db_sub.submitted_at, orig_submitted_at) # Should keep original submitted_at
+        self.assertEqual(db_sub.final_answer_text, "Refined Final Answer on Retry")  # Should save refined answer on retry
+        self.assertEqual(db_sub.started_at, orig_started_at)  # Should keep original started_at
+        self.assertEqual(db_sub.submitted_at, orig_submitted_at)  # Should keep original submitted_at
 
         # Verify exactly one evaluation created
         db_evals = self.db.query(Evaluation).filter(Evaluation.submission_id == sub_id).all()

@@ -196,11 +196,11 @@ def submit_answer(
     # First submission or retry logic
     is_retry = submission.status == "evaluation_failed"
     
+    submission.final_answer_text = payload.final_answer_text
     if not is_retry:
-        submission.final_answer_text = payload.final_answer_text
         submission.submitted_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(submission)
+    db.commit()
+    db.refresh(submission)
     
     # Load transcript turns for anti-gaming checks and Judge evaluation
     turns = db.query(TranscriptTurn).filter(
