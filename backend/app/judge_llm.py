@@ -217,6 +217,48 @@ def _build_judge_prompt(
 
     return system_prompt, user_content
 
+def apply_hallucination_consistency_rules(
+    dimension_scores: Dict[str, int],
+    flaw_results: List[dict]
+) -> tuple[Dict[str, int], List[str]]:
+    """
+    Applies deterministic consistency rules for the hallucination_catching dimension:
+    1. If an applicable flaw appeared in the transcript and was NOT caught,
+       hallucination_catching is capped at 4.
+    2. If at least one flaw appeared and ALL appeared flaws were caught,
+       hallucination_catching is floored at 6.
+    Returns (adjusted_dimension_scores, list_of_adjustments).
+    """
+    scores = dict(dimension_scores)
+    adjustments: List[str] = []
+
+    if "hallucination_catching" not in scores:
+        return scores, adjustments
+
+    appeared_flaws = [f for f in flaw_results if f.get("appeared", False)]
+    if not appeared_flaws:
+        return scores, adjustments
+
+    any_uncaught = any(not f.get("caught", False) for f in appeared_flaws)
+    all_caught = all(f.get("caught", False) for f in appeared_flaws)
+
+    current_score = scores["hallucination_catching"]
+
+    if any_uncaught and current_score > 4:
+        scores["hallucination_catching"] = 4
+        adjustments.append(
+            f"Capped hallucination_catching score from {current_score} to 4 "
+            f"because an applicable planted flaw appeared and was not caught."
+        )
+    elif all_caught and current_score < 6:
+        scores["hallucination_catching"] = 6
+        adjustments.append(
+            f"Floored hallucination_catching score from {current_score} to 6 "
+            f"because all appeared planted flaws were caught."
+        )
+
+    return scores, adjustments
+
 def validate_judge_run_dimensions(run_dict: dict, expected_dimensions: Any) -> Dict[str, dict]:
     """
     Validates that a judge run output contains every expected rubric dimension exactly once,
@@ -318,21 +360,23 @@ def call_judge_ai(
                     "evidence": "Candidate challenged assistant's fabricated assumption."
                 })
         
-        overall = calculate_overall_score(mock_scores, rubric_json, not_applicable_dimensions=not_applicable_dims)
+        adjusted_mock_scores, adjustments = apply_hallucination_consistency_rules(mock_scores, flaw_evals)
+        overall = calculate_overall_score(adjusted_mock_scores, rubric_json, not_applicable_dimensions=not_applicable_dims)
         
         return {
             "overall_score": overall,
-            "dimension_scores": mock_scores,
+            "dimension_scores": adjusted_mock_scores,
             "dimension_reasoning": {
                 dim: {"dimension_name": dim, "score": s, "reasoning": "Mocked dimension evaluation.", "evidence": "Transcript quote."}
-                for dim, s in mock_scores.items()
+                for dim, s in adjusted_mock_scores.items()
             },
             "flaw_results": flaw_evals,
+            "adjustments": adjustments,
             "reasoning": "Mocked Judge evaluation: Candidate successfully solved the case and validated findings.",
             "raw_runs": [{
                 "dimension_scores": [
                     {"dimension_name": dim, "score": s, "reasoning": "Mock run evaluation.", "evidence": "Mock evidence"}
-                    for dim, s in mock_scores.items()
+                    for dim, s in adjusted_mock_scores.items()
                 ],
                 "flaw_evaluations": flaw_evals,
                 "summary_reasoning": "Mock run evaluation."
@@ -450,6 +494,14 @@ def call_judge_ai(
     elif runs_output:
         flaw_results = runs_output[0].get("flaw_evaluations", [])
 
+    # Apply deterministic hallucination consistency rules (cap at 4 if uncaught, floor at 6 if all caught)
+    adjusted_dimension_scores, adjustments = apply_hallucination_consistency_rules(
+        median_dimension_scores,
+        flaw_results
+    )
+    if "hallucination_catching" in dimension_reasoning and "hallucination_catching" in adjusted_dimension_scores:
+        dimension_reasoning["hallucination_catching"]["score"] = adjusted_dimension_scores["hallucination_catching"]
+
     # If planted flaws exist, but none appeared in transcript (via aggregated appeared),
     # mark hallucination_catching as not applicable
     not_applicable_dims = []
@@ -458,9 +510,9 @@ def call_judge_ai(
         if not any_flaw_appeared and "hallucination_catching" in weights:
             not_applicable_dims.append("hallucination_catching")
 
-    # Compute overall score server-side from median scores with renormalised weights
+    # Compute overall score server-side from adjusted median scores with renormalised weights
     overall_score = calculate_overall_score(
-        dimension_scores=median_dimension_scores,
+        dimension_scores=adjusted_dimension_scores,
         rubric_json=rubric_json,
         not_applicable_dimensions=not_applicable_dims
     )
@@ -489,9 +541,10 @@ def call_judge_ai(
 
     return {
         "overall_score": overall_score,
-        "dimension_scores": median_dimension_scores,
+        "dimension_scores": adjusted_dimension_scores,
         "dimension_reasoning": dimension_reasoning,
         "flaw_results": flaw_results,
+        "adjustments": adjustments,
         "reasoning": summary_reasoning,
         "raw_runs": runs_output,
         "model": GEMINI_MODEL,

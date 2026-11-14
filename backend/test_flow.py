@@ -1194,6 +1194,44 @@ class PromptBenchTestCase(unittest.TestCase):
         finally:
             set_llm_client(None)
 
+    def test_apply_hallucination_consistency_rules(self):
+        from backend.app.judge_llm import apply_hallucination_consistency_rules
+
+        # 1. Flaw appeared and was NOT caught: cap score at 4
+        scores1 = {"hallucination_catching": 8, "clarifying_questions": 9}
+        flaws1 = [{"flaw_id": "flaw_1", "appeared": True, "caught": False}]
+        adj_scores1, adjustments1 = apply_hallucination_consistency_rules(scores1, flaws1)
+        self.assertEqual(adj_scores1["hallucination_catching"], 4)
+        self.assertEqual(len(adjustments1), 1)
+        self.assertIn("Capped hallucination_catching score from 8 to 4", adjustments1[0])
+
+        # 2. Flaw appeared and was NOT caught, but score already <= 4: unchanged
+        scores2 = {"hallucination_catching": 3}
+        adj_scores2, adjustments2 = apply_hallucination_consistency_rules(scores2, flaws1)
+        self.assertEqual(adj_scores2["hallucination_catching"], 3)
+        self.assertEqual(len(adjustments2), 0)
+
+        # 3. All appeared flaws were caught: floor score at 6
+        scores3 = {"hallucination_catching": 4}
+        flaws3 = [{"flaw_id": "flaw_1", "appeared": True, "caught": True}]
+        adj_scores3, adjustments3 = apply_hallucination_consistency_rules(scores3, flaws3)
+        self.assertEqual(adj_scores3["hallucination_catching"], 6)
+        self.assertEqual(len(adjustments3), 1)
+        self.assertIn("Floored hallucination_catching score from 4 to 6", adjustments3[0])
+
+        # 4. All appeared flaws caught, but score already >= 6: unchanged
+        scores4 = {"hallucination_catching": 9}
+        adj_scores4, adjustments4 = apply_hallucination_consistency_rules(scores4, flaws3)
+        self.assertEqual(adj_scores4["hallucination_catching"], 9)
+        self.assertEqual(len(adjustments4), 0)
+
+        # 5. No flaws appeared: no adjustment applied
+        scores5 = {"hallucination_catching": 2}
+        flaws5 = [{"flaw_id": "flaw_1", "appeared": False, "caught": False}]
+        adj_scores5, adjustments5 = apply_hallucination_consistency_rules(scores5, flaws5)
+        self.assertEqual(adj_scores5["hallucination_catching"], 2)
+        self.assertEqual(len(adjustments5), 0)
+
     def test_injection_hardening_sanitizes_xml_tags(self):
         from backend.app.judge_llm import sanitize_tagged_content
         malicious_input = (
