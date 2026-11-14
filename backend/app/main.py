@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -17,11 +18,9 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware configuration
-# For production deployment, you would change these origins to match your domain
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+raw_origins = os.getenv("ALLOWED_ORIGINS", default_origins)
+origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,

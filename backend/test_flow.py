@@ -267,6 +267,11 @@ class PromptBenchTestCase(unittest.TestCase):
         valid_sub = SubmitFinal(final_answer_text="a" * 8000)
         self.assertEqual(len(valid_sub.final_answer_text), 8000)
 
+    def test_cors_configuration(self):
+        from starlette.middleware.cors import CORSMiddleware
+        cors_middlewares = [m for m in app.user_middleware if m.cls == CORSMiddleware]
+        self.assertTrue(len(cors_middlewares) > 0)
+
     # ==========================================
     # 4. JUDGE JSON PARSING & VALIDATION
     # ==========================================
