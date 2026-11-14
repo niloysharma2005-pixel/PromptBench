@@ -246,10 +246,85 @@ class PromptBenchTestCase(unittest.TestCase):
         submit_fail = self.client.post(f"/api/submissions/{sub_id}/submit", json={"final_answer_text": "Another recommendation."}, headers=headers)
         self.assertEqual(submit_fail.status_code, 400)
 
-    def test_turn_index_unique_constraint_defined(self):
-        table_args = getattr(TranscriptTurn, "__table_args__", ())
-        constraint_names = [c.name for c in table_args if hasattr(c, "name")]
-        self.assertIn("uq_submission_turn_index", constraint_names)
+    def test_turn_index_integrity_error_retry_behavior(self):
+        from sqlalchemy.exc import IntegrityError
+        from unittest.mock import MagicMock
+        from backend.app.db import get_db
+        from backend.app.auth import get_current_user
+        from backend.app.models import User, Submission, Question, TranscriptTurn
+        from backend.app.auth_utils import create_access_token
+
+        dummy_user = User(id=10, email="retry_test@example.com")
+        dummy_question = Question(id=1, prompt_text="Prompt", context_data="Context")
+        dummy_submission = Submission(id=42, user_id=10, status="in_progress", question=dummy_question)
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = dummy_submission
+        mock_db.query.return_value.filter.return_value.count.side_effect = [1, 2, 3]
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+        commit_calls = 0
+        def fake_commit():
+            nonlocal commit_calls
+            commit_calls += 1
+            if commit_calls == 1:
+                raise IntegrityError("INSERT", {}, Exception("duplicate key value violates unique constraint"))
+            return None
+
+        mock_db.commit.side_effect = fake_commit
+
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_current_user] = lambda: dummy_user
+
+        try:
+            token = create_access_token({"user_id": 10})
+            res = self.client.post(
+                "/api/submissions/42/message",
+                json={"message": "Hello after collision"},
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            self.assertEqual(res.status_code, 200)
+            mock_db.rollback.assert_called_once()
+            added_turns = [
+                call.args[0] for call in mock_db.add.call_args_list if isinstance(call.args[0], TranscriptTurn)
+            ]
+            self.assertTrue(len(added_turns) >= 2)
+            self.assertEqual(added_turns[1].turn_index, 2)
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_duplicate_turn_index_raises_integrity_error_in_db(self):
+        if not self.has_real_db:
+            self.skipTest("Skipping real DB constraint test when PostgreSQL is not connected.")
+        from sqlalchemy.exc import IntegrityError
+        user = User(email="turn_dup_test@example.com", password_hash="hash")
+        self.db.add(user)
+        self.db.commit()
+
+        sub = Submission(user_id=user.id, question_id=self.question_id, status="in_progress")
+        self.db.add(sub)
+        self.db.commit()
+
+        turn1 = TranscriptTurn(
+            submission_id=sub.id,
+            turn_index=0,
+            role="user",
+            content="First turn"
+        )
+        self.db.add(turn1)
+        self.db.commit()
+
+        turn2 = TranscriptTurn(
+            submission_id=sub.id,
+            turn_index=0,
+            role="assistant",
+            content="Conflicting turn"
+        )
+        self.db.add(turn2)
+        with self.assertRaises(IntegrityError):
+            self.db.commit()
+        self.db.rollback()
 
     def test_abuse_limits_validation(self):
         from pydantic import ValidationError
